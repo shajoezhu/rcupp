@@ -1,0 +1,9 @@
+# Windows build, UCRT toolchain (R >= 4.2 / Rtools42+). Identical CPU-only shim
+# build to Makevars.win; see that file for the rationale. Kept as a separate
+# file because R prefers Makevars.ucrt over Makevars.win on UCRT.
+
+CXX_STD = CXX17
+
+OBJECTS = RcppExports.o rcupp_exports.o cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o
+
+PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)

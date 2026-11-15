@@ -1,0 +1,19 @@
+# Windows build (Rtools, any toolchain). CUDA is Unix-only in this package:
+# `configure` is a POSIX sh script and R never runs it on Windows (it looks for
+# configure.win), and nvcc / .cu / libcudart.so are unavailable here. Always
+# build the CPU reference shim instead -- it implements the SAME fixed C ABI
+# and FISTA solver as the CUDA backend, just without GPU acceleration, so
+# cuda_available() returns FALSE and every downstream package still installs,
+# runs and passes R CMD check.
+#
+# STATIC file: no configure step is needed. R prefers Makevars.ucrt on the
+# Rtools42+ UCRT toolchain and this Makevars.win otherwise; either overrides
+# any src/Makevars. OBJECTS is explicit and at column 0 so R compiles exactly
+# the CPU set -- never auto-globbing src/*.cpp and never attempting the .cu
+# sources (which would otherwise pull in the missing CUDA backend).
+
+CXX_STD = CXX17
+
+OBJECTS = RcppExports.o rcupp_exports.o cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o
+
+PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)

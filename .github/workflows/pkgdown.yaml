@@ -1,15 +1,18 @@
 # Build this package's pkgdown site and deploy it to THIS repository's
 # GitHub Pages. One repository -> one package -> one site.
 #
-# Runners have no CUDA Toolkit: rcupp builds its CPU reference shim. cuda.ml
-# is not installed (the comparison vignette guards it with requireNamespace()),
-# and _R_CHECK_FORCE_SUGGESTS_ is disabled to match the check workflow.
+# Dependencies are installed by r-lib/actions/setup-r-dependencies@v2 (pak)
+# with `needs: website`, which installs the DESCRIPTION deps plus pkgdown
+# from `Config/Needs/website` into the single runner library shared by every
+# step and R subprocess. `local::.` installs this package itself, so pkgdown
+# runs with install = FALSE reusing that install. This replaces the ad-hoc
+# install.packages() steps that caused "there is no package called 'pkgdown'".
+# The real site URL is injected through build_site(override = ...); no
+# placeholder URL is committed in _pkgdown.yml.
 #
-# The package is installed explicitly first (rcupp before the consumers,
-# because cudaGlmnet Imports it and cudaBio / cudaFin LinkingTo it). pkgdown
-# then runs with install = FALSE, reusing that install. The real site URL is
-# injected through build_site(override = ...); no placeholder URL is committed
-# in _pkgdown.yml.
+# Runners have no CUDA Toolkit: rcupp builds its CPU reference shim. Optional
+# Suggests are not forced: _R_CHECK_FORCE_SUGGESTS_ is disabled to match the
+# check workflow.
 
 name: pkgdown 📚
 
@@ -27,6 +30,9 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   build-deploy:
     name: Build & deploy site 🌐
@@ -38,20 +44,13 @@ jobs:
       _R_CHECK_FORCE_SUGGESTS_: "false"
     steps:
       - uses: actions/checkout@v4
-      - uses: r-lib/actions/setup-r@v2
       - uses: r-lib/actions/setup-pandoc@v2
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::pkgdown, local::.
+          needs: website
       - uses: actions/configure-pages@v5
-
-      - name: Install R dependencies
-        shell: Rscript {0}
-        run: |
-          install.packages(
-            c("Rcpp", "RcppArmadillo", "knitr", "rmarkdown", "pkgdown", "testthat", "remotes"),
-            repos = "https://cloud.r-project.org"
-          )
-
-      - name: Install this package
-        run: R CMD INSTALL .
 
       - name: Build pkgdown site
         shell: Rscript {0}

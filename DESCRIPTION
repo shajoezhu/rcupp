@@ -1,7 +1,8 @@
 Package: rcupp
 Type: Package
 Title: Rcpp Bridge to a Fixed CUDA GPU Operator Library
-Version: 0.0.0.9002
+Version: 0.0.1
+Date: 2026-11-16
 Authors@R: person("Joe", "Zhu", email = "sha.joe.zhu@gmail.com", role = c("aut", "cre"))
 Author: Joe Zhu [aut, cre]
 Maintainer: Joe Zhu <sha.joe.zhu@gmail.com>
@@ -24,8 +25,9 @@ SystemRequirements: C++17, CUDA toolkit (>= 12.x) [optional]
 NeedsCompilation: yes
 LinkingTo: Rcpp, RcppArmadillo
 Imports: Rcpp
-Suggests: testthat (>= 3.0.0), knitr, rmarkdown, pkgdown
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown
 VignetteBuilder: knitr
 Config/testthat/edition: 3
+Config/Needs/website: pkgdown
 Roxygen: list(markdown = TRUE, load = "source")
 Config/roxygen2/version: 8.1.0

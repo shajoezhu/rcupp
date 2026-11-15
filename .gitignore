@@ -1,3 +1,4 @@
 src/Makevars
 src/*.o
 src/*.so
+*gz
