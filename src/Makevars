@@ -3,12 +3,12 @@
 
 CXX_STD = CXX17
 
-CUDA_HOME = /usr/local/cuda-13.1
-NVCC = /usr/local/cuda-13.1/bin/nvcc
-NVCCFLAGS = -O2 -Xcompiler -fPIC -Xcompiler -std=gnu++17 -gencode arch=compute_89,code=sm_89 -I/usr/local/cuda-13.1/include -DHAVE_CUDA
+CUDA_HOME = /usr/local/cuda
+NVCC = /usr/local/cuda/bin/nvcc
+NVCCFLAGS = -O2 -Xcompiler -fPIC -Xcompiler -std=gnu++17 -gencode arch=compute_89,code=sm_89 -I/usr/local/cuda/include -DHAVE_CUDA
 
-PKG_CPPFLAGS = -I/usr/local/cuda-13.1/include -DHAVE_CUDA
-PKG_LIBS = -L/usr/local/cuda-13.1/lib64 -Wl,-rpath,/usr/local/cuda-13.1/lib64 -lcudart -lcublas
+PKG_CPPFLAGS = -I/usr/local/cuda/include -DHAVE_CUDA
+PKG_LIBS = -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64 -lcudart -lcublas
 
 # Column 0 on purpose: R's tools:::.shlib_internal only defers to this object
 # list when Makevars contains a line matching ^OBJECTS *= (no leading space).
