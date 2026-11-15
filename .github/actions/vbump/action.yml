@@ -1,0 +1,41 @@
+name: 'Development version bump'
+description: >-
+  Bump the .900x development version in this package's DESCRIPTION, then
+  commit and push the change back to the current branch. Uses the credentials
+  persisted by actions/checkout, so no extra secret is required.
+runs:
+  using: 'composite'
+  steps:
+    - name: Bump DESCRIPTION version
+      shell: bash
+      run: |
+        set -euo pipefail
+        f="DESCRIPTION"
+        old="$(sed -n 's/^Version:[[:space:]]*//p' "$f")"
+        if [ -z "$old" ]; then
+          echo "::error::No Version field in $f"
+          exit 1
+        fi
+        prefix="${old%.*}"
+        last="${old##*.}"
+        if ! [[ "$last" =~ ^[0-9]+$ ]]; then
+          echo "::error::Cannot bump non-numeric version '$old' in $f"
+          exit 1
+        fi
+        new="${prefix}.$((10#$last + 1))"
+        sed -i "s/^Version:.*/Version: ${new}/" "$f"
+        echo "$f: $old -> $new"
+
+    - name: Commit and push
+      shell: bash
+      run: |
+        set -euo pipefail
+        git add -- DESCRIPTION
+        if git diff --cached --quiet; then
+          echo "No version change to commit."
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git commit -m "chore: bump development version [skip vbump]"
+        git push origin "HEAD:${GITHUB_REF_NAME}"

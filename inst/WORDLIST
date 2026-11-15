@@ -2,10 +2,13 @@ CUDA
 FISTA
 GetCCallable
 LinkingTo
+Lipschitz
 Rcpp
 RegisterCCallable
 checkable
 coef
+cuBLAS
+finalizer
 glmnet
 installable
 runnable

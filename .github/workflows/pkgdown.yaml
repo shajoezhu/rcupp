@@ -1,0 +1,78 @@
+# Build this package's pkgdown site and deploy it to THIS repository's
+# GitHub Pages. One repository -> one package -> one site.
+#
+# Runners have no CUDA Toolkit: rcupp builds its CPU reference shim. cuda.ml
+# is not installed (the comparison vignette guards it with requireNamespace()),
+# and _R_CHECK_FORCE_SUGGESTS_ is disabled to match the check workflow.
+#
+# The package is installed explicitly first (rcupp before the consumers,
+# because cudaGlmnet Imports it and cudaBio / cudaFin LinkingTo it). pkgdown
+# then runs with install = FALSE, reusing that install. The real site URL is
+# injected through build_site(override = ...); no placeholder URL is committed
+# in _pkgdown.yml.
+
+name: pkgdown 📚
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-deploy:
+    name: Build & deploy site 🌐
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      _R_CHECK_FORCE_SUGGESTS_: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-pandoc@v2
+      - uses: actions/configure-pages@v5
+
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: |
+          install.packages(
+            c("Rcpp", "RcppArmadillo", "knitr", "rmarkdown", "pkgdown", "testthat", "remotes"),
+            repos = "https://cloud.r-project.org"
+          )
+
+      - name: Install this package
+        run: R CMD INSTALL .
+
+      - name: Build pkgdown site
+        shell: Rscript {0}
+        run: |
+          owner <- Sys.getenv("GITHUB_REPOSITORY_OWNER")
+          repo <- sub("^.*/", "", Sys.getenv("GITHUB_REPOSITORY"))
+          pkgdown::build_site(
+            ".",
+            install = FALSE,
+            new_process = FALSE,
+            preview = FALSE,
+            override = list(
+              destination = "docs",
+              url = sprintf("https://%s.github.io/%s/", owner, repo)
+            )
+          )
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

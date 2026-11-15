@@ -1,0 +1,154 @@
+# CI for the standalone rcupp repository.
+#
+# This package is the ROOT of its own repository: there is no matrix and no
+# sibling package directory. `R CMD build .` builds the current directory and
+# `R CMD check` runs on the resulting tarball.
+#
+# Runners have no CUDA Toolkit: rcupp builds its CPU reference shim and any
+# CUDA-only tests skip themselves. cuda.ml (used only behind a
+# requireNamespace() guard in the vignette) is not installed, so
+# _R_CHECK_FORCE_SUGGESTS_ is disabled.
+#
+# The only external actions are GitHub's own actions/checkout and the
+# r-lib/actions setup-r helper; vbump is a local composite action under
+# .github/actions/vbump. No external CI template is referenced.
+#
+# R-based gates run with the package directory as cwd so lintr / spelling
+# pick up .lintr / inst/WORDLIST.
+
+name: Check 🛠
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  r-cmd:
+    name: R CMD Check 🧬
+    runs-on: ubuntu-latest
+    env:
+      _R_CHECK_FORCE_SUGGESTS_: "false"
+      NOT_CRAN: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: |
+          install.packages(
+            c("Rcpp", "RcppArmadillo", "testthat", "knitr", "rmarkdown", "remotes"),
+            repos = "https://cloud.r-project.org"
+          )
+
+      - name: Build and check
+        run: |
+          R CMD build .
+          R CMD check --no-manual rcupp_*.tar.gz
+
+  coverage:
+    name: Coverage 📔
+    runs-on: ubuntu-latest
+    env:
+      _R_CHECK_FORCE_SUGGESTS_: "false"
+      NOT_CRAN: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: |
+          install.packages(
+            c("Rcpp", "RcppArmadillo", "testthat", "knitr", "rmarkdown", "remotes", "covr"),
+            repos = "https://cloud.r-project.org"
+          )
+
+      - name: Measure coverage
+        shell: Rscript {0}
+        run: |
+          cv <- covr::package_coverage(".")
+          print(cv)
+          cat(sprintf("Coverage: %.2f%%\n", covr::percent_coverage(cv)))
+
+  linter:
+    name: Lint 🦸
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: |
+          install.packages(
+            c("Rcpp", "RcppArmadillo", "remotes", "lintr"),
+            repos = "https://cloud.r-project.org"
+          )
+
+      - name: Lint package
+        shell: Rscript {0}
+        run: |
+          l <- lintr::lint_package(".")
+          cat(sprintf("%d lints\n", length(l)))
+          if (length(l) > 0L) { print(l); quit(status = 1L, save = "no") }
+
+  spelling:
+    name: Spell Check 🆎
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install spelling
+        shell: Rscript {0}
+        run: install.packages("spelling", repos = "https://cloud.r-project.org")
+      - name: Spell check package
+        shell: Rscript {0}
+        run: |
+          w <- spelling::spell_check_package(".")
+          cat(sprintf("%d flagged words\n", nrow(w)))
+          if (nrow(w) > 0L) { print(w); quit(status = 1L, save = "no") }
+
+  links:
+    name: Check URLs 🌐
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install urlchecker
+        shell: Rscript {0}
+        run: install.packages("urlchecker", repos = "https://cloud.r-project.org")
+      - name: Check URLs in package
+        shell: Rscript {0}
+        run: |
+          r <- urlchecker::url_check(".")
+          cat(sprintf("%d URL findings\n", nrow(r)))
+          if (nrow(r) > 0L) {
+            print(r)
+            # Fail only on definite breakage; redirects / timeouts are noisy
+            # on shared runners, so they are reported without failing the job.
+            status <- as.character(r$Status)
+            fatal <- grepl(
+              "[45][0-9]{2}|Error|Not Found|Could not resolve|Failed",
+              status, ignore.case = TRUE
+            )
+            if (any(fatal)) quit(status = 1L, save = "no")
+          }
+
+  vbump:
+    name: Version Bump 🤜🤛
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !contains(github.event.head_commit.message, '[skip vbump]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/vbump
