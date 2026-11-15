@@ -93,11 +93,14 @@ test_that("session input validation and destroyed-handle safety", {
 test_that("independent sessions do not interfere", {
   d1 <- rand_data(seed = 21L)
   d2 <- rand_data(seed = 22L)
-  s1 <- lasso_session(); session_set_data(s1, d1$X, d1$y)
-  s2 <- lasso_session(); session_set_data(s2, d2$X, d2$y)
+  s1 <- lasso_session()
+  session_set_data(s1, d1$X, d1$y)
+  s2 <- lasso_session()
+  session_set_data(s2, d2$X, d2$y)
   expect_equal(session_fit(s1, 0.05)$beta,
                lasso_fista(d1$X, d1$y, 0.05)$beta, tolerance = 0)
   expect_equal(session_fit(s2, 0.05)$beta,
                lasso_fista(d2$X, d2$y, 0.05)$beta, tolerance = 0)
-  session_destroy(s1); session_destroy(s2)
+  session_destroy(s1)
+  session_destroy(s2)
 })

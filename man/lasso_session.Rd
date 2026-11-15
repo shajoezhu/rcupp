@@ -51,9 +51,10 @@ dominates such workloads.
 }
 \details{
 Cold-start fits (\code{warm_start = FALSE}, the default) are bit-identical to
-a one-shot \code{\link[=lasso_fista]{lasso_fista()}} call for the same data and \code{lambda}. Warm-start
-fits seed from the previous solution and converge to the same optimum (not
-bit-identical), so they should be validated with a relaxed tolerance.
+a one-shot \code{\link[=lasso_fista]{lasso_fista()}} call for the same data and \code{lambda}.
+Warm-start fits seed from the previous solution and converge to the same
+optimum (not bit-identical), so they should be validated with a relaxed
+tolerance.
 
 Sessions own GPU resources. The external pointer returned by
 \code{\link[=lasso_session]{lasso_session()}} has a finalizer that frees them at garbage-collection time;

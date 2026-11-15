@@ -24,7 +24,7 @@ SystemRequirements: C++17, CUDA toolkit (>= 12.x) [optional]
 NeedsCompilation: yes
 LinkingTo: Rcpp, RcppArmadillo
 Imports: Rcpp
-Suggests: testthat (>= 3.0.0), knitr, rmarkdown
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown, pkgdown
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE, load = "source")
