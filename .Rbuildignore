@@ -1,0 +1,6 @@
+^src/Makevars$
+^src/symbols\.rds$
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.lintr$
+^_pkgdown\.yml$

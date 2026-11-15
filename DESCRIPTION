@@ -1,0 +1,31 @@
+Package: rcupp
+Type: Package
+Title: Rcpp Bridge to a Fixed CUDA GPU Operator Library
+Version: 0.0.0.9000
+Authors@R: person("Joe", "Zhu", email = "sha.joe.zhu@gmail.com", role = c("aut", "cre"))
+Author: Joe Zhu [aut, cre]
+Maintainer: Joe Zhu <sha.joe.zhu@gmail.com>
+Description: Low-level Rcpp/CUDA bridge exposing a fixed set of GPU linear
+    algebra operators and a GPU FISTA solver for the Gaussian lasso. Device
+    memory is kept resident across the whole solver loop, and a session API
+    (persistent device X / cuBLAS-handle reuse) keeps state resident across
+    repeated fits such as lambda paths and cross-validation. A public C API
+    (inst/include/rcupp.h, R_RegisterCCallable/R_GetCCallable) lets downstream
+    packages LinkingTo: rcupp and call the operators and session from their
+    own C++ code, making rcupp a reusable CUDA-for-Rcpp framework. The CUDA
+    Toolkit is optional: without it a supported CPU fallback implements the
+    same FISTA solver AND the same public C API (including sessions), so the
+    package stays installable, runnable and checkable everywhere (no GPU
+    acceleration).
+License: Apache License 2.0
+Encoding: UTF-8
+Language: en-US
+SystemRequirements: C++17, CUDA toolkit (>= 12.x) [optional]
+NeedsCompilation: yes
+LinkingTo: Rcpp, RcppArmadillo
+Imports: Rcpp
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE, load = "source")
+Config/roxygen2/version: 8.1.0

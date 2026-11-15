@@ -1,0 +1,24 @@
+# Templated by ../configure at install time -> generates src/Makevars.
+# DO NOT edit the generated src/Makevars (it is git-ignored / Rbuildignored).
+
+CXX_STD = CXX17
+
+CUDA_HOME = /usr/local/cuda-13.1
+NVCC = /usr/local/cuda-13.1/bin/nvcc
+NVCCFLAGS = -O2 -Xcompiler -fPIC -Xcompiler -std=gnu++17 -gencode arch=compute_89,code=sm_89 -I/usr/local/cuda-13.1/include -DHAVE_CUDA
+
+PKG_CPPFLAGS = -I/usr/local/cuda-13.1/include -DHAVE_CUDA
+PKG_LIBS = -L/usr/local/cuda-13.1/lib64 -Wl,-rpath,/usr/local/cuda-13.1/lib64 -lcudart -lcublas
+
+# Column 0 on purpose: R's tools:::.shlib_internal only defers to this object
+# list when Makevars contains a line matching ^OBJECTS *= (no leading space).
+# Without it R would auto-compile every .cpp in src/, which in CUDA mode would
+# also pull in cpu_stub.o -> duplicate rcupp_* symbols at link time.
+OBJECTS = RcppExports.o rcupp_exports.o gpu_ops.o lasso_fista_cuda.o rcupp_api_cuda.o rcupp_session_cuda.o
+
+# Pattern rule, NOT a .cu.o suffix rule: Makeconf clears .SUFFIXES after this
+# file is read. -Xcompiler -fPIC is mandatory for the shared object; CUDA
+# includes and -DHAVE_CUDA live in NVCCFLAGS because PKG_CXXFLAGS never
+# reaches nvcc. nvcc host std matches R's CXX17 (gnu++17).
+%.o: %.cu
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@

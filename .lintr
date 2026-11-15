@@ -1,0 +1,3 @@
+# X mirrors the column-major design matrix in the C++ ABI and the math
+# notation used in the roxygen docs; keep object_name_linter off for it.
+linters: linters_with_defaults(object_name_linter = NULL)

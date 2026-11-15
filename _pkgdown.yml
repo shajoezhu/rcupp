@@ -1,0 +1,17 @@
+destination: ../docs/rcupp
+
+template:
+  bootstrap: 5
+
+reference:
+- title: Solver
+  contents:
+  - lasso_fista
+- title: Backend
+  contents:
+  - cuda_available
+
+articles:
+- title: Get started
+  contents:
+  - getting-started

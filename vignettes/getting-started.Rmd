@@ -1,0 +1,59 @@
+---
+title: "Getting started with rcupp"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with rcupp}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(rcupp)
+```
+
+`rcupp` is the low-level bridge to a fixed set of GPU linear algebra
+operators. Most users will want the high-level `cudaGlmnet` package instead;
+this vignette shows the raw solver entry point and how to read its result.
+
+## A first fit
+
+```{r fit}
+set.seed(1)
+X <- matrix(rnorm(50 * 5), 50, 5)
+y <- drop(X %*% c(2, -1, 0, 0, 0)) + rnorm(50, sd = 0.3)
+
+fit <- lasso_fista(X, y, lambda = 0.05)
+fit$beta
+```
+
+The solver minimizes the Gaussian lasso objective
+`1/(2n) * sum((y - X %*% b)^2) + lambda * sum(abs(b))`. It returns a list
+with the coefficient vector and a few diagnostics:
+
+```{r result}
+fit$objective
+fit$iterations
+fit$converged
+```
+
+## Backend
+
+`rcupp` can be built with a CUDA backend or with a CPU reference shim. The
+same call and the same result shape apply in both cases; `cuda_available()`
+only reports which one is linked.
+
+```{r backend}
+cuda_available()
+fit$backend
+```
+
+No GPU is required to run this vignette. When the package was built without
+the CUDA toolkit the solver uses the CPU shim and all examples still work.
+
+## Where to go next
+
+The `cudaGlmnet` package wraps this solver with a glmnet-like interface:
+lambda paths, cross-validation, standardization and coef/predict methods.
+Downstream packages can also call the public C operators directly through
+`LinkingTo: rcupp`; see the repository's linking guide.
