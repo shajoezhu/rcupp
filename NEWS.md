@@ -1,3 +1,3 @@
-# rcupp 0.0.1
+# rcupp 0.0.2
 
- * First release.
+ * First CRAN release.
