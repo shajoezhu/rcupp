@@ -1,5 +1,7 @@
 # rcupp
 
+<img src="man/figures/logo.png" align="right" height="160" alt="rcupp hexsticker" />
+
 [![Check](https://github.com/shajoezhu/rcupp/actions/workflows/check.yaml/badge.svg)](https://github.com/shajoezhu/rcupp/actions/workflows/check.yaml)
 
 A lightweight, low-level **Rcpp/CUDA bridge** that exposes a fixed set of GPU
