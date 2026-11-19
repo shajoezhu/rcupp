@@ -1,8 +1,8 @@
 Package: rcupp
 Type: Package
 Title: 'Rcpp' Bridge to a Fixed 'CUDA' GPU Operator Library
-Version: 0.0.2
-Date: 2026-11-16
+Version: 0.1.0
+Date: 2026-11-19
 Authors@R: person("Joe", "Zhu", email = "sha.joe.zhu@gmail.com", role = c("aut", "cre"))
 Author: Joe Zhu [aut, cre]
 Maintainer: Joe Zhu <sha.joe.zhu@gmail.com>
@@ -13,11 +13,15 @@ Description: Lightweight, low-level 'Rcpp'/'CUDA' bridge exposing a fixed set of
     repeated fits such as lambda paths and cross-validation. A public C API
     (inst/include/rcupp.h, R_RegisterCCallable/R_GetCCallable) lets downstream
     packages LinkingTo: 'rcupp' and call the operators and session from their
-    own C++ code, making 'rcupp' a reusable 'CUDA'-for-'Rcpp' framework. The 'CUDA'
+    own C++ code, making 'rcupp' a reusable 'CUDA'-for-'Rcpp' framework. A
+    Phase-0 generic device-context C ABI adds an algorithm-agnostic, resident
+    operator layer: downstream packages compose these parts into their own
+    solver loops (Rcpp glue plus rcupp substrate) with no host-device round
+    trip per operator. The 'CUDA'
     Toolkit is optional: without it a supported CPU fallback implements the
-    same 'FISTA' solver AND the same public C API (including sessions), so the
-    package stays installable, runnable and checkable everywhere (no GPU
-    acceleration).
+    same 'FISTA' solver AND the same public C API (sessions and the
+    device-context layer), so the package stays installable, runnable and
+    checkable everywhere (no GPU acceleration).
 License: Apache License 2.0
 Encoding: UTF-8
 Language: en-US

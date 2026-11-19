@@ -58,7 +58,7 @@ if [ "$HAVE_CUDA" -eq 1 ]; then
   V_CPPFLAGS="-I$CUDA_HOME/include -DHAVE_CUDA"
   V_LIBS="-L$CUDA_LIBDIR -Wl,-rpath,$CUDA_LIBDIR -lcudart -lcublas"
   V_NVCCFLAGS="-O2 -Xcompiler -fPIC -Xcompiler -std=gnu++17 -gencode arch=compute_$CUDA_ARCH,code=sm_$CUDA_ARCH -I$CUDA_HOME/include -DHAVE_CUDA"
-  V_EXTRA="gpu_ops.o lasso_fista_cuda.o rcupp_api_cuda.o rcupp_session_cuda.o"
+  V_EXTRA="gpu_ops.o lasso_fista_cuda.o rcupp_api_cuda.o rcupp_session_cuda.o rcupp_ctx_cuda.o"
 else
   echo "configure: WARNING - no usable CUDA Toolkit; building CPU reference shim (GPU disabled)." >&2
   echo "configure: after installing the toolkit: source cuda-env.sh && make install-gpu" >&2
@@ -67,7 +67,7 @@ else
   V_CPPFLAGS=""
   V_LIBS=""
   V_NVCCFLAGS=""
-  V_EXTRA="cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o"
+  V_EXTRA="cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o rcupp_ctx_cpu.o"
 fi
 
 sed -e "s|@CUDA_HOME@|$V_CUDA_HOME|g" \

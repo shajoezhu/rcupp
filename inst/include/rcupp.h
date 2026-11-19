@@ -137,4 +137,140 @@ static inline void rcupp_session_destroy(void* h) {
   fun(h);
 }
 
+/* ===========================================================================
+ * Phase 0: generic device-context C ABI (ABI version 1)
+ *
+ * An algorithm-agnostic, RESIDENT device layer. A downstream package writes
+ * its own solver loop in C++ (Rcpp glue) and composes these operators; rcupp
+ * never learns what lasso / ridge / PCA is. All symbols are resolved lazily
+ * via R_GetCCallable() and registered by rcupp at DLL load.
+ *
+ * rcupp_ctx owns the CUDA/cuBLAS handle + a buffer registry. Every rcupp_buf
+ * belongs to a ctx and is freed at rcupp_ctx_destroy(). All rcupp_d_* ops run
+ * on resident buffers with NO host<->device round trip. X is n x p,
+ * column-major (R order), matching the F0 operators exactly.
+ *
+ * This sits ALONGSIDE the one-shot F0 operators and the lasso-specific P1
+ * session above; those remain unchanged. Use this layer when you want to keep
+ * data resident across many operator calls (e.g. an ISTA / power-iteration
+ * inner loop) instead of copying H->D->H on every call.
+ * ======================================================================== */
+#ifndef RCUPP_CTX_TYPEDEFS
+#define RCUPP_CTX_TYPEDEFS
+typedef void* rcupp_ctx;
+typedef void* rcupp_buf;
+#endif
+
+/* ---- ABI version ---- */
+static inline int rcupp_ctx_abi(void) {
+  typedef int (*fn_t)(void);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_ctx_abi");
+  return fun();
+}
+
+/* ---- context lifecycle ---- */
+static inline rcupp_ctx rcupp_ctx_create(void) {
+  typedef rcupp_ctx (*fn_t)(void);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_ctx_create");
+  return fun();
+}
+static inline void rcupp_ctx_destroy(rcupp_ctx c) {
+  typedef void (*fn_t)(rcupp_ctx);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_ctx_destroy");
+  fun(c);
+}
+static inline void rcupp_ctx_sync(rcupp_ctx c) {
+  typedef void (*fn_t)(rcupp_ctx);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_ctx_sync");
+  fun(c);
+}
+
+/* ---- buffer lifecycle (owned by ctx) ---- */
+static inline rcupp_buf rcupp_buf_alloc(rcupp_ctx c, int n) {
+  typedef rcupp_buf (*fn_t)(rcupp_ctx, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_buf_alloc");
+  return fun(c, n);
+}
+static inline void rcupp_buf_free(rcupp_ctx c, rcupp_buf b) {
+  typedef void (*fn_t)(rcupp_ctx, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_buf_free");
+  fun(c, b);
+}
+static inline int rcupp_buf_upload(rcupp_ctx c, rcupp_buf b,
+                                   const double* host, int n) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, const double*, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_buf_upload");
+  return fun(c, b, host, n);
+}
+static inline int rcupp_buf_download(rcupp_ctx c, rcupp_buf b,
+                                     double* host, int n) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, double*, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_buf_download");
+  return fun(c, b, host, n);
+}
+static inline int rcupp_buf_fill(rcupp_ctx c, rcupp_buf b,
+                                 double value, int n) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, double, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_buf_fill");
+  return fun(c, b, value, n);
+}
+
+/* ---- resident device operators ---- */
+static inline int rcupp_d_gemv(rcupp_ctx c, rcupp_buf X, int n, int p,
+                               rcupp_buf v, rcupp_buf out) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_gemv");
+  return fun(c, X, n, p, v, out);
+}
+static inline int rcupp_d_gemv_t(rcupp_ctx c, rcupp_buf X, int n, int p,
+                                 rcupp_buf r, rcupp_buf out) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_gemv_t");
+  return fun(c, X, n, p, r, out);
+}
+static inline int rcupp_d_axpy(rcupp_ctx c, int n, double alpha,
+                               rcupp_buf x, rcupp_buf y) {
+  typedef int (*fn_t)(rcupp_ctx, int, double, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_axpy");
+  return fun(c, n, alpha, x, y);
+}
+static inline int rcupp_d_scal(rcupp_ctx c, int n, double alpha,
+                               rcupp_buf x) {
+  typedef int (*fn_t)(rcupp_ctx, int, double, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_scal");
+  return fun(c, n, alpha, x);
+}
+static inline int rcupp_d_copy(rcupp_ctx c, int n,
+                               rcupp_buf src, rcupp_buf dst) {
+  typedef int (*fn_t)(rcupp_ctx, int, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_copy");
+  return fun(c, n, src, dst);
+}
+static inline int rcupp_d_ger(rcupp_ctx c, int n, int p, double alpha,
+                              rcupp_buf x, rcupp_buf y, rcupp_buf A) {
+  typedef int (*fn_t)(rcupp_ctx, int, int, double,
+                      rcupp_buf, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_ger");
+  return fun(c, n, p, alpha, x, y, A);
+}
+static inline int rcupp_d_soft_threshold(rcupp_ctx c, rcupp_buf u,
+                                         double t, rcupp_buf out, int n) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, double, rcupp_buf, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_soft_threshold");
+  return fun(c, u, t, out, n);
+}
+
+/* ---- scalar reductions (host-returning; 8-byte sync point) ---- */
+static inline double rcupp_d_dot(rcupp_ctx c, int n,
+                                 rcupp_buf a, rcupp_buf b) {
+  typedef double (*fn_t)(rcupp_ctx, int, rcupp_buf, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_dot");
+  return fun(c, n, a, b);
+}
+static inline double rcupp_d_nrm2(rcupp_ctx c, int n, rcupp_buf x) {
+  typedef double (*fn_t)(rcupp_ctx, int, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_nrm2");
+  return fun(c, n, x);
+}
+
 #endif /* RCUPP_H */

@@ -4,6 +4,6 @@
 
 CXX_STD = CXX17
 
-OBJECTS = RcppExports.o rcupp_exports.o cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o
+OBJECTS = RcppExports.o rcupp_exports.o cpu_stub.o rcupp_api_cpu.o rcupp_session_cpu.o rcupp_ctx_cpu.o
 
 PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)

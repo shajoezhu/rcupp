@@ -3,6 +3,7 @@
 #include "rcupp_internal.h"
 #include "rcupp_api.h"
 #include "rcupp_session.h"
+#include "rcupp_ctx.h"
 
 /*
  * The ONLY file containing [[Rcpp::export]] attributes. It is compiled by g++
@@ -176,4 +177,26 @@ void rcupp_init_ccallables(DllInfo* dll) {
                       (DL_FUNC) &rcupp_session_fit);
   R_RegisterCCallable("rcupp", "rcupp_session_destroy",
                       (DL_FUNC) &rcupp_session_destroy);
+
+  /* Phase 0: generic device-context C ABI (inst/include/rcupp.h §4).
+   * No [[Rcpp::export]] is added for these; they are C++-callable only,
+   * resolved by downstream packages via R_GetCCallable(). */
+  R_RegisterCCallable("rcupp", "rcupp_ctx_abi",            (DL_FUNC) &rcupp_ctx_abi);
+  R_RegisterCCallable("rcupp", "rcupp_ctx_create",         (DL_FUNC) &rcupp_ctx_create);
+  R_RegisterCCallable("rcupp", "rcupp_ctx_destroy",        (DL_FUNC) &rcupp_ctx_destroy);
+  R_RegisterCCallable("rcupp", "rcupp_ctx_sync",           (DL_FUNC) &rcupp_ctx_sync);
+  R_RegisterCCallable("rcupp", "rcupp_buf_alloc",          (DL_FUNC) &rcupp_buf_alloc);
+  R_RegisterCCallable("rcupp", "rcupp_buf_free",           (DL_FUNC) &rcupp_buf_free);
+  R_RegisterCCallable("rcupp", "rcupp_buf_upload",         (DL_FUNC) &rcupp_buf_upload);
+  R_RegisterCCallable("rcupp", "rcupp_buf_download",       (DL_FUNC) &rcupp_buf_download);
+  R_RegisterCCallable("rcupp", "rcupp_buf_fill",           (DL_FUNC) &rcupp_buf_fill);
+  R_RegisterCCallable("rcupp", "rcupp_d_gemv",             (DL_FUNC) &rcupp_d_gemv);
+  R_RegisterCCallable("rcupp", "rcupp_d_gemv_t",           (DL_FUNC) &rcupp_d_gemv_t);
+  R_RegisterCCallable("rcupp", "rcupp_d_axpy",             (DL_FUNC) &rcupp_d_axpy);
+  R_RegisterCCallable("rcupp", "rcupp_d_scal",             (DL_FUNC) &rcupp_d_scal);
+  R_RegisterCCallable("rcupp", "rcupp_d_copy",             (DL_FUNC) &rcupp_d_copy);
+  R_RegisterCCallable("rcupp", "rcupp_d_ger",              (DL_FUNC) &rcupp_d_ger);
+  R_RegisterCCallable("rcupp", "rcupp_d_soft_threshold",   (DL_FUNC) &rcupp_d_soft_threshold);
+  R_RegisterCCallable("rcupp", "rcupp_d_dot",              (DL_FUNC) &rcupp_d_dot);
+  R_RegisterCCallable("rcupp", "rcupp_d_nrm2",             (DL_FUNC) &rcupp_d_nrm2);
 }
