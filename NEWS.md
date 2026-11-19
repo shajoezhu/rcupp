@@ -1,3 +1,7 @@
+# rcupp 0.1.1
+
+* Development version bumped from 0.1.0.
+
 # rcupp 0.1.0
 
  * Add Phase 0 generic device-context C ABI (ABI version 1): an algorithm-agnostic,
