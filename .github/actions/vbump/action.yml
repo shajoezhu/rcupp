@@ -1,21 +1,64 @@
 name: 'Development version bump'
 description: >-
-  Bump the .900x development version in this package's DESCRIPTION, then
-  commit and push the change back to the current branch. Uses the credentials
-  persisted by actions/checkout, so no extra secret is required.
+  Keep DESCRIPTION Version and NEWS.md top heading in sync, then bump the
+  .900x development version, prepend the matching NEWS.md section, and commit
+  and push both files back to the current branch. Repairs any pre-existing
+  DESCRIPTION/NEWS drift before bumping, so a partial run that bumped
+  DESCRIPTION without adding the heading does not leave a version skipped in
+  the changelog. Uses the credentials persisted by actions/checkout, so no
+  extra secret is required.
 runs:
   using: 'composite'
   steps:
-    - name: Bump DESCRIPTION version
+    - name: Reconcile NEWS.md, then bump DESCRIPTION and NEWS.md
       shell: bash
       run: |
         set -euo pipefail
         f="DESCRIPTION"
+        news="NEWS.md"
+        if [ ! -f "$f" ]; then
+          echo "::error::$f is missing"
+          exit 1
+        fi
+        pkg="$(sed -n 's/^Package:[[:space:]]*//p' "$f")"
+        [ -n "$pkg" ] || pkg="$(basename "$PWD")"
         old="$(sed -n 's/^Version:[[:space:]]*//p' "$f")"
         if [ -z "$old" ]; then
           echo "::error::No Version field in $f"
           exit 1
         fi
+
+        # Same parse as a version gate: first '#' heading, last dotted number
+        # on that line (empty if NEWS.md is missing or has no heading).
+        news_top_version() {
+          [ -f "$news" ] || { printf ''; return 0; }
+          local heading
+          heading="$(grep -m1 '^#' "$news" || true)"
+          printf '%s\n' "$heading" | grep -oE '[0-9]+([.][0-9]+)+' | tail -1 || true
+        }
+
+        # Prepend a section for `ver`; also creates NEWS.md when it is absent.
+        prepend_heading() {
+          local ver="$1" note="$2" tmp
+          tmp="${news}.vbump.tmp"
+          {
+            printf '# %s %s\n\n' "$pkg" "$ver"
+            printf '* %s\n\n' "$note"
+            if [ -f "$news" ]; then cat "$news"; fi
+          } > "$tmp"
+          mv -f "$tmp" "$news"
+        }
+
+        # Self-heal: a previous partial run may have bumped DESCRIPTION without
+        # adding the NEWS heading. Record `old` first so every bump starts from
+        # a consistent state and no version is skipped in the changelog.
+        cur="$(news_top_version)"
+        if [ "$cur" != "$old" ]; then
+          echo "::warning::$news top ($cur) != DESCRIPTION ($old); repairing drift"
+          prepend_heading "$old" \
+            "Reconciled NEWS.md with DESCRIPTION version ${old}."
+        fi
+
         prefix="${old%.*}"
         last="${old##*.}"
         if ! [[ "$last" =~ ^[0-9]+$ ]]; then
@@ -26,11 +69,33 @@ runs:
         sed -i "s/^Version:.*/Version: ${new}/" "$f"
         echo "$f: $old -> $new"
 
+        header="# ${pkg} ${new}"
+        if [ -f "$news" ] && grep -qF "$header" "$news"; then
+          echo "$news already has a section for ${new}; leaving it unchanged."
+        else
+          prepend_heading "$new" "Development version bumped from ${old}."
+          echo "$news: added section for ${new}"
+        fi
+
+    - name: Verify DESCRIPTION and NEWS.md agree
+      shell: bash
+      run: |
+        set -euo pipefail
+        desc_ver="$(sed -n 's/^Version:[[:space:]]*//p' DESCRIPTION)"
+        heading="$(grep -m1 '^#' NEWS.md || true)"
+        news_ver="$(printf '%s\n' "$heading" | \
+          grep -oE '[0-9]+([.][0-9]+)+' | tail -1 || true)"
+        if [ -z "$news_ver" ] || [ "$desc_ver" != "$news_ver" ]; then
+          echo "::error::DESCRIPTION ($desc_ver) != NEWS.md top ($news_ver)"
+          exit 1
+        fi
+        echo "DESCRIPTION and NEWS.md agree on ${desc_ver}"
+
     - name: Commit and push
       shell: bash
       run: |
         set -euo pipefail
-        git add -- DESCRIPTION
+        git add -- DESCRIPTION NEWS.md
         if git diff --cached --quiet; then
           echo "No version change to commit."
           exit 0
@@ -38,4 +103,7 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git commit -m "chore: bump development version [skip vbump]"
-        git push origin "HEAD:${GITHUB_REF_NAME}"
+        # GITHUB_REF_NAME is always set on Actions; the fallback keeps the
+        # composite action runnable in local clones / simulations.
+        branch="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+        git push origin "HEAD:${branch}"

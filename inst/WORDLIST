@@ -1,3 +1,4 @@
+ABI
 CUDA
 FISTA
 GetCCallable
@@ -8,7 +9,12 @@ RegisterCCallable
 checkable
 coef
 cuBLAS
+cudaBio
+cudaFin
+cudaGlmnet
 finalizer
+github
 glmnet
 installable
 runnable
+walkthrough

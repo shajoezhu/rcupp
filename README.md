@@ -1,6 +1,6 @@
-# rcupp
+# rcupp <a href='https://github.com/shajoezhu/rcupp'><img src="man/figures/logo.png" align="right" height="160" alt="rcupp hexsticker" /></a>
 
-<img src="man/figures/logo.png" align="right" height="160" alt="rcupp hexsticker" />
+<!-- start badges -->
 
 [![Check](https://github.com/shajoezhu/rcupp/actions/workflows/check.yaml/badge.svg)](https://github.com/shajoezhu/rcupp/actions/workflows/check.yaml)
 
