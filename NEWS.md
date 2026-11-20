@@ -1,3 +1,7 @@
+# rcupp 0.1.1
+
+* Development version bumped from 0.1.0.
+
 # rcupp 0.1.0
 
  * Add four additive B-stage parts to the Phase 0 device-context C ABI
