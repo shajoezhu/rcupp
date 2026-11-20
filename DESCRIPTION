@@ -1,7 +1,7 @@
 Package: rcupp
 Type: Package
 Title: 'Rcpp' Bridge to a Fixed 'CUDA' GPU Operator Library
-Version: 0.1.2
+Version: 0.1.3
 Date: 2026-11-19
 Authors@R: person("Joe", "Zhu", email = "sha.joe.zhu@gmail.com", role = c("aut", "cre"))
 Author: Joe Zhu [aut, cre]

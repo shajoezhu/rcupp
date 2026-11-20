@@ -1,3 +1,7 @@
+# rcupp 0.1.3
+
+* Development version bumped from 0.1.2.
+
 # rcupp 0.1.2
 
 * Add the four originally reserved / level-2 parts to the Phase 0 device-context
