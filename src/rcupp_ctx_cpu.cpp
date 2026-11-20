@@ -1,8 +1,11 @@
 #include <cmath>
+#include <algorithm>
 #include <cstddef>
 #include <vector>
-#include <R_ext/Lapack.h>   /* F77_NAME(dsyrk/dpotrf/dpotrs), FCONE; pulls in BLAS.h */
+#include <R_ext/Lapack.h>   /* F77_NAME(dgesvd/dpotrf/dpotrs), FCONE */
+#include <R_ext/BLAS.h>     /* F77_NAME(dsyrk/dgemm), FCONE */
 #include "rcupp_ctx.h"
+#include "rcupp_parts_impl.h"   /* shared level-2 cg_solve / prox_grad_step */
 
 /*
  * CPU-fallback implementation of the PHASE 0 generic device-context C ABI
@@ -347,4 +350,91 @@ extern "C" int rcupp_d_potrs(void* h, int uplo, int n, int nrhs,
                    B->mem.data(), &ldbb, &inf FCONE);
   *info = inf;
   return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Reserved / level-2 parts (ABI stays 1). gemm via R's BLAS dgemm, gesvd via
+ * R's LAPACK dgesvd, cg_solve / prox_grad_step via the shared
+ * rcupp_parts_impl.h that composes the level-1 resident operators. Semantics
+ * mirror the CUDA backend exactly (column-major, tall-only gesvd, A read-only).
+ * ------------------------------------------------------------------------- */
+
+static char op_char(int trans) { return trans == 1 ? 'T' : 'N'; }
+
+extern "C" int rcupp_d_gemm(void* h, int transa, int transb, int m, int n,
+                            int k, double alpha, void* Ah, int lda,
+                            void* Bh, int ldb, double beta, void* Ch, int ldc) {
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || m <= 0 || n <= 0 || k <= 0) return 1;
+  if (transa != 0 && transa != 1) return 1;
+  if (transb != 0 && transb != 1) return 1;
+  if (lda < (transa == 0 ? m : k)) return 1;
+  if (ldb < (transb == 0 ? k : n)) return 1;
+  if (ldc < m) return 1;
+  const std::size_t a_need = (transa == 0)
+      ? static_cast<std::size_t>(k - 1) * lda + m
+      : static_cast<std::size_t>(m - 1) * lda + k;
+  const std::size_t b_need = (transb == 0)
+      ? static_cast<std::size_t>(n - 1) * ldb + k
+      : static_cast<std::size_t>(k - 1) * ldb + n;
+  const std::size_t c_need = static_cast<std::size_t>(n - 1) * ldc + m;
+  Buf* A = resolve(c, Ah, a_need);
+  Buf* B = resolve(c, Bh, b_need);
+  Buf* C = resolve(c, Ch, c_need);
+  if (A == NULL || B == NULL || C == NULL) return 1;
+  char ta = op_char(transa), tb = op_char(transb);
+  F77_NAME(dgemm)(&ta, &tb, &m, &n, &k, &alpha,
+                  A->mem.data(), &lda, B->mem.data(), &ldb,
+                  &beta, C->mem.data(), &ldc FCONE FCONE);
+  return 0;
+}
+
+extern "C" int rcupp_d_gesvd(void* h, void* Ah, int m, int n, int lda,
+                             void* Sh, void* Uh, int ldu, void* VTh, int ldvt,
+                             int* info) {
+  if (info == NULL) return 1;
+  *info = -1;
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c)) return 1;
+  /* Tall-only to match the CUDA backend's unified contract. */
+  if (m < n || n <= 0 || lda < m || ldu < m || ldvt < n) return 1;
+  const int k = n;
+  const std::size_t a_need  = static_cast<std::size_t>(n - 1) * lda + m;
+  const std::size_t u_need  = static_cast<std::size_t>(k - 1) * ldu + m;
+  const std::size_t vt_need = static_cast<std::size_t>(n - 1) * ldvt + k;
+  Buf* A  = resolve(c, Ah, a_need);
+  Buf* S  = resolve(c, Sh, static_cast<std::size_t>(k));
+  Buf* U  = resolve(c, Uh, u_need);
+  Buf* VT = resolve(c, VTh, vt_need);
+  if (A == NULL || S == NULL || U == NULL || VT == NULL) return 1;
+  /* dgesvd destroys its input; factor a host copy so A is preserved. */
+  std::vector<double> acopy(A->mem.data(), A->mem.data() + a_need);
+  /* Generous workspace bound (>= LAPACK's documented minimum for 'S','S');
+   * LAPACK happily uses extra workspace, so no query call is needed. */
+  const int mn = std::min(m, n), mx = std::max(m, n);
+  int lwork = 5 * mx + 5 * mn + 64;
+  std::vector<double> work(static_cast<std::size_t>(lwork), 0.0);
+  char ju = 'S', jv = 'S';
+  int inf = 0;
+  F77_NAME(dgesvd)(&ju, &jv, &m, &n, acopy.data(), &lda,
+                   S->mem.data(), U->mem.data(), &ldu,
+                   VT->mem.data(), &ldvt, work.data(), &lwork,
+                   &inf FCONE FCONE);
+  *info = inf;
+  return 0;
+}
+
+extern "C" int rcupp_d_cg_solve(void* h, void* X, int n, int p, void* y,
+                                double shift, double tol, int max_iter,
+                                void* x, int* iters, double* residual,
+                                int* converged) {
+  return rcupp_cg_solve_impl(h, X, n, p, y, shift, tol, max_iter, x,
+                             iters, residual, converged);
+}
+
+extern "C" int rcupp_d_prox_grad_step(void* h, void* X, int n, int p, void* y,
+                                      void* z, double step, double threshold,
+                                      double inv_scale, void* out) {
+  return rcupp_prox_grad_step_impl(h, X, n, p, y, z, step, threshold,
+                                   inv_scale, out);
 }

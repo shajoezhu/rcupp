@@ -1,5 +1,14 @@
 # rcupp 0.1.2
 
+* Add the four originally reserved / level-2 parts to the Phase 0 device-context
+  C ABI (ABI still 1): `rcupp_d_gemm` (general GEMM), `rcupp_d_gesvd` (thin SVD
+  of a tall matrix), `rcupp_d_cg_solve` (conjugate-gradient solve of the damped
+  normal equations), and `rcupp_d_prox_grad_step` (one fused proximal-gradient
+  step). `gemm`/`gesvd` use cuBLAS/cuSOLVER (CUDA) or R's BLAS/LAPACK (CPU
+  fallback); the two level-2 parts are shared composites built only from the
+  level-1 resident operators. No new `[[Rcpp::export]]`, `rcupp_ctx_abi()` stays
+  1, and `rcupp` remains algorithm-agnostic (no finished solver).
+
 * Development version bumped from 0.1.1.
 
 # rcupp 0.1.1

@@ -168,6 +168,13 @@ typedef void* rcupp_buf;
 #define RCUPP_FILL_UPPER 1
 #endif
 
+/* Whether a gemm operand is transposed. Values are 0/1 (not cublas enums),
+ * so the public header stays CUDA-free and backend-agnostic. */
+#ifndef RCUPP_OP_N
+#define RCUPP_OP_N 0
+#define RCUPP_OP_T 1
+#endif
+
 /* ---- ABI version ---- */
 static inline int rcupp_ctx_abi(void) {
   typedef int (*fn_t)(void);
@@ -339,6 +346,91 @@ static inline int rcupp_d_potrs(rcupp_ctx c, int uplo, int n, int nrhs,
                       rcupp_buf, int, rcupp_buf, int, int*);
   static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_potrs");
   return fun(c, uplo, n, nrhs, A, lda, B, ldb, info);
+}
+
+/* ---------------------------------------------------------------------------
+ * Phase 0 reserved / level-2 parts (ABI stays at 1).
+ *
+ * These complete the original Phase-B catalog. They are ADDITIVE,
+ * algorithm-agnostic parts on the SAME resident buffers: gemm/gesvd are
+ * level-1 BLAS/LAPACK-style primitives; cg_solve/prox_grad_step are level-2
+ * composites built ONLY from the level-1 resident operators, so a downstream
+ * package can either compose level-1 parts itself (max control) or call one
+ * level-2 part for a whole iteration (fewer C-ABI crossings). rcupp STILL
+ * learns nothing about lasso / ridge / CV / lambda paths -- those loops stay
+ * downstream (Rcpp + rcupp). ABI version is UNCHANGED (1): rcupp_ctx_abi()
+ * stays 1 and existing downstream guards need no update.
+ * ------------------------------------------------------------------------- */
+
+/* C[m x n] = alpha * op(A) * op(B) + beta * C, column-major (R order).
+ * op is RCUPP_OP_N (identity) or RCUPP_OP_T (transpose). op(A) is m x k,
+ * op(B) is k x n. With OP_N, A is stored m x k (lda >= m) and B is k x n
+ * (ldb >= k); with OP_T the stored shape is reversed. C is m x n (ldc >= m).
+ * alpha/beta here are the BLAS scalars (NOT the elastic-net mixing alpha). */
+static inline int rcupp_d_gemm(rcupp_ctx c, int transa, int transb,
+                               int m, int n, int k, double alpha,
+                               rcupp_buf A, int lda, rcupp_buf B, int ldb,
+                               double beta, rcupp_buf C, int ldc) {
+  typedef int (*fn_t)(rcupp_ctx, int, int, int, int, int, double,
+                      rcupp_buf, int, rcupp_buf, int, double, rcupp_buf, int);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_gemm");
+  return fun(c, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+}
+
+/* Thin SVD of a TALL resident A[m x n] (m >= n, lda >= m), column-major.
+ * A is READ-ONLY: rcupp factors an internal copy, so the caller's matrix is
+ * preserved (LAPACK/cuSOLVER both destroy their input otherwise). k = n.
+ * Outputs (resident buffers): S[k] singular values in descending order,
+ * U[m x k] (ldu >= m), VT[k x n] (ldvt >= k), so A ~= U diag(S) VT.
+ * *info follows LAPACK (0 = ok, >0 = did not converge). REQUIRES m >= n:
+ * cuSOLVER's legacy gesvd is tall-only, so the part rejects m < n (returns
+ * non-0) on BOTH backends for one unified contract. For wide matrices,
+ * compose the Gram (syrk) + Cholesky parts downstream (the dual route). */
+static inline int rcupp_d_gesvd(rcupp_ctx c, rcupp_buf A, int m, int n, int lda,
+                                rcupp_buf S, rcupp_buf U, int ldu,
+                                rcupp_buf VT, int ldvt, int* info) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int, int,
+                      rcupp_buf, rcupp_buf, int, rcupp_buf, int, int*);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_gesvd");
+  return fun(c, A, m, n, lda, S, U, ldu, VT, ldvt, info);
+}
+
+/* Solve (X^T X + shift*I) x = X^T y by conjugate gradients on resident
+ * buffers. This is a GENERIC damped-normal-equations primitive (a numerical
+ * linear solver), NOT a model solver: rcupp does not know about ridge/lasso,
+ * lambda paths, or CV. X is n x p, y is n, x is p (in: initial guess,
+ * out: solution). shift >= 0 (shift > 0 => the system is SPD), tol > 0,
+ * max_iter >= 1. Out-args: *iters (iterations run), *residual (||r||2 at
+ * stop), *converged (1/0). Returns 0 on success (inspect *converged), non-0
+ * on invalid args / breakdown. All work stays resident; scalar reductions
+ * (dot products) are small host sync points, one per CG iteration. */
+static inline int rcupp_d_cg_solve(rcupp_ctx c, rcupp_buf X, int n, int p,
+                                   rcupp_buf y, double shift, double tol,
+                                   int max_iter, rcupp_buf x, int* iters,
+                                   double* residual, int* converged) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int, rcupp_buf, double,
+                      double, int, rcupp_buf, int*, double*, int*);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_cg_solve");
+  return fun(c, X, n, p, y, shift, tol, max_iter, x, iters, residual, converged);
+}
+
+/* ONE proximal-gradient (ISTA) step on resident buffers:
+ *   out = prox( z + step * X^T (y - X z) ),
+ * where prox(u) = soft_threshold(u, threshold) * inv_scale.
+ * X is n x p, y is n, z is p (current iterate), out is p (next iterate).
+ * A generic level-2 part that folds one whole iteration into a single C-ABI
+ * call (the matvecs remain cuBLAS/gemv internal launches, but there are no
+ * host<->device round trips and no per-operator boundary crossings). The
+ * lambda path, FISTA momentum and convergence test STAY DOWNSTREAM. Returns
+ * 0 on success, non-0 on invalid args. */
+static inline int rcupp_d_prox_grad_step(rcupp_ctx c, rcupp_buf X, int n, int p,
+                                         rcupp_buf y, rcupp_buf z, double step,
+                                         double threshold, double inv_scale,
+                                         rcupp_buf out) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int, rcupp_buf, rcupp_buf,
+                      double, double, double, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_prox_grad_step");
+  return fun(c, X, n, p, y, z, step, threshold, inv_scale, out);
 }
 
 #endif /* RCUPP_H */

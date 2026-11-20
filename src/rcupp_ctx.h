@@ -26,7 +26,9 @@
  * All buffers belong to a context; rcupp_ctx_destroy() frees every buffer
  * still owned. X is n x p, COLUMN-MAJOR (R order), matching the F0 operators.
  * ABI version 1: rcupp_ctx_abi() returns 1. The B-stage parts
- * (gather_rows / syrk / potrf / potrs) are ADDITIVE and do not bump the ABI.
+ * (gather_rows / syrk / potrf / potrs) and the reserved/level-2 parts
+ * (gemm / gesvd / cg_solve / prox_grad_step) are ADDITIVE and do not bump the
+ * ABI -- rcupp_ctx_abi() stays 1 and downstream guards need no update.
  */
 
 #ifdef __cplusplus
@@ -87,6 +89,44 @@ int   rcupp_d_potrf(void* c, int uplo, int n,
                     void* A, int lda, int* info);                  /* Cholesky factor */
 int   rcupp_d_potrs(void* c, int uplo, int n, int nrhs,
                     void* A, int lda, void* B, int ldb, int* info);/* solve A X = B */
+
+/* ---- reserved / level-2 parts (ABI stays 1) ----
+ * These complete the original Phase-B catalog. gemm/gesvd are level-1
+ * BLAS/LAPACK-style parts; cg_solve/prox_grad_step are level-2 composites
+ * built ONLY from the level-1 resident operators (see rcupp_parts_impl.h),
+ * so both backends share one implementation and stay algorithm-agnostic:
+ * rcupp still learns nothing about lasso / ridge / CV / lambda paths.
+ *
+ * op (gemm): RCUPP_OP_N=0 (no transpose) / RCUPP_OP_T=1 (transpose).
+ * gemm:   C[m x n] = alpha * op(A) * op(B) + beta * C, column-major.
+ * gesvd:  thin SVD of a TALL resident A[m x n] (m >= n, lda >= m). A is
+ *         read-only (factored on an internal copy). k = n. Outputs S[k]
+ *         (descending), U[m x k] (ldu >= m), VT[k x n] (ldvt >= k).
+ *         *info is LAPACK-style (0 = ok, >0 = no convergence). m < n is
+ *         REJECTED (cuSOLVER's legacy gesvd is tall-only); use the Gram
+ *         (syrk) + Cholesky parts downstream for wide matrices.
+ * cg_solve: solve (X^T X + shift*I) x = X^T y by conjugate gradients on
+ *         resident buffers (a generic damped-normal-equations primitive,
+ *         NOT a model solver). X is n x p, y n, x p (in: guess, out: solve).
+ *         shift >= 0 (shift > 0 => SPD), tol > 0, max_iter >= 1. Out-args:
+ *         *iters, *residual (= ||r||2 at stop), *converged (1/0).
+ * prox_grad_step: ONE proximal-gradient step on resident buffers:
+ *         out = prox(z + step * X^T (y - X z)), where prox(u) is
+ *         soft_threshold(u, threshold) scaled by inv_scale. X n x p, y n,
+ *         z p (current iterate), out p (next iterate). A level-2 part; the
+ *         lambda path / momentum / convergence stay DOWNSTREAM.
+ * Returns 0 on success, non-0 on invalid args / shape / backend failure. */
+int   rcupp_d_gemm(void* c, int transa, int transb, int m, int n, int k,
+                   double alpha, void* A, int lda, void* B, int ldb,
+                   double beta, void* C, int ldc);
+int   rcupp_d_gesvd(void* c, void* A, int m, int n, int lda, void* S,
+                    void* U, int ldu, void* VT, int ldvt, int* info);
+int   rcupp_d_cg_solve(void* c, void* X, int n, int p, void* y, double shift,
+                       double tol, int max_iter, void* x, int* iters,
+                       double* residual, int* converged);
+int   rcupp_d_prox_grad_step(void* c, void* X, int n, int p, void* y, void* z,
+                             double step, double threshold, double inv_scale,
+                             void* out);
 
 #ifdef __cplusplus
 }

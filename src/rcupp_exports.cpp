@@ -207,4 +207,13 @@ void rcupp_init_ccallables(DllInfo* dll) {
   R_RegisterCCallable("rcupp", "rcupp_d_syrk",             (DL_FUNC) &rcupp_d_syrk);
   R_RegisterCCallable("rcupp", "rcupp_d_potrf",            (DL_FUNC) &rcupp_d_potrf);
   R_RegisterCCallable("rcupp", "rcupp_d_potrs",            (DL_FUNC) &rcupp_d_potrs);
+
+  /* Reserved / level-2 parts (ABI still 1): gemm / gesvd (level-1 BLAS/
+   * LAPACK-style) and cg_solve / prox_grad_step (level-2 composites). No
+   * [[Rcpp::export]]; C++-callable only, resolved downstream via
+   * R_GetCCallable(). */
+  R_RegisterCCallable("rcupp", "rcupp_d_gemm",             (DL_FUNC) &rcupp_d_gemm);
+  R_RegisterCCallable("rcupp", "rcupp_d_gesvd",            (DL_FUNC) &rcupp_d_gesvd);
+  R_RegisterCCallable("rcupp", "rcupp_d_cg_solve",         (DL_FUNC) &rcupp_d_cg_solve);
+  R_RegisterCCallable("rcupp", "rcupp_d_prox_grad_step",   (DL_FUNC) &rcupp_d_prox_grad_step);
 }

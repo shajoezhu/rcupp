@@ -1,6 +1,7 @@
 ABI
 CUDA
 FISTA
+GEMM
 GetCCallable
 LinkingTo
 Lipschitz

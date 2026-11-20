@@ -5,6 +5,7 @@
 #include <vector>
 #include "gpu_ops.cuh"
 #include "rcupp_ctx.h"
+#include "rcupp_parts_impl.h"   /* shared level-2 cg_solve / prox_grad_step */
 
 /*
  * CUDA implementation of the PHASE 0 generic device-context C ABI
@@ -61,17 +62,23 @@ struct Buf {
 struct Ctx {
   cublasHandle_t handle;
   bool handle_ok;
-  cusolverDnHandle_t cusolver;   /* best-effort; potrf/potrs only */
+  cusolverDnHandle_t cusolver;   /* best-effort; potrf/potrs/gesvd only */
   bool cusolver_ok;
-  double* d_work;               /* cuSOLVER potrf workspace (doubles) */
+  double* d_work;               /* cuSOLVER workspace (doubles), potrf/gesvd */
   int work_cap;                  /* capacity in doubles */
+  double* d_rwork;              /* cuSOLVER gesvd rwork (doubles) */
+  int rwork_cap;                 /* capacity in doubles */
+  double* d_acopy;              /* internal copy of A for gesvd (A read-only) */
+  int acopy_cap;                 /* capacity in doubles */
   int* d_info;                   /* device int, cuSOLVER info */
   int* d_idx;                    /* device int array, gather row indices */
   int idx_cap;                   /* capacity in ints */
   std::vector<Buf*> bufs;        /* owned; freed at rcupp_ctx_destroy */
   Ctx()
       : handle(), handle_ok(false), cusolver(), cusolver_ok(false),
-        d_work(NULL), work_cap(0), d_info(NULL), d_idx(NULL), idx_cap(0) {}
+        d_work(NULL), work_cap(0), d_rwork(NULL), rwork_cap(0),
+        d_acopy(NULL), acopy_cap(0),
+        d_info(NULL), d_idx(NULL), idx_cap(0) {}
 };
 
 /* Resolve an opaque buffer handle: must be non-NULL, belong to this context,
@@ -108,17 +115,29 @@ bool ensure_idx(Ctx* c, int need) {
   return true;
 }
 
-/* Lazily (re)size the cuSOLVER workspace to hold `need` doubles. */
-bool ensure_work(Ctx* c, int need) {
-  if (need <= c->work_cap && c->d_work != NULL) return true;
-  double* p = NULL;
-  if (cudaMalloc(reinterpret_cast<void**>(&p),
+/* Lazily (re)size a device double scratch buffer to hold `need` doubles. */
+bool ensure_dbl(double** p, int* cap, int need) {
+  if (need <= *cap && *p != NULL) return true;
+  double* q = NULL;
+  if (cudaMalloc(reinterpret_cast<void**>(&q),
                  static_cast<std::size_t>(need) * sizeof(double))
       != cudaSuccess) return false;
-  if (c->d_work != NULL) cudaFree(c->d_work);
-  c->d_work = p;
-  c->work_cap = need;
+  if (*p != NULL) cudaFree(*p);
+  *p = q;
+  *cap = need;
   return true;
+}
+
+/* cuSOLVER workspace (potrf/gesvd), rwork (gesvd), and the read-only A copy
+ * used by gesvd (LAPACK/cuSOLVER destroy their input). */
+bool ensure_work(Ctx* c, int need) {
+  return ensure_dbl(&c->d_work, &c->work_cap, need);
+}
+bool ensure_rwork(Ctx* c, int need) {
+  return ensure_dbl(&c->d_rwork, &c->rwork_cap, need);
+}
+bool ensure_acopy(Ctx* c, int need) {
+  return ensure_dbl(&c->d_acopy, &c->acopy_cap, need);
 }
 
 /* Lazily allocate the single device int used for cuSOLVER info. */
@@ -158,6 +177,8 @@ extern "C" void rcupp_ctx_destroy(void* h) {
   for (std::size_t k = 0; k < c->bufs.size(); ++k) delete c->bufs[k];
   c->bufs.clear();
   if (c->d_work != NULL) cudaFree(c->d_work);
+  if (c->d_rwork != NULL) cudaFree(c->d_rwork);
+  if (c->d_acopy != NULL) cudaFree(c->d_acopy);
   if (c->d_info != NULL) cudaFree(c->d_info);
   if (c->d_idx != NULL) cudaFree(c->d_idx);
   if (c->cusolver_ok) cusolverDnDestroy(c->cusolver);
@@ -414,4 +435,96 @@ extern "C" int rcupp_d_potrs(void* h, int uplo, int n, int nrhs,
   if (cudaMemcpy(info, c->d_info, sizeof(int), cudaMemcpyDeviceToHost)
       != cudaSuccess) return 1;
   return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Reserved / level-2 parts (ABI stays 1). gemm via cuBLAS, gesvd via
+ * cuSOLVER, cg_solve / prox_grad_step via the shared rcupp_parts_impl.h that
+ * composes the level-1 resident operators. All run on resident buffers.
+ * ------------------------------------------------------------------------- */
+
+static inline cublasOperation_t op_mode(int trans) {
+  return trans == 1 ? CUBLAS_OP_T : CUBLAS_OP_N;
+}
+
+extern "C" int rcupp_d_gemm(void* h, int transa, int transb, int m, int n,
+                            int k, double alpha, void* Ah, int lda,
+                            void* Bh, int ldb, double beta, void* Ch, int ldc) {
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || m <= 0 || n <= 0 || k <= 0) return 1;
+  if (transa != 0 && transa != 1) return 1;
+  if (transb != 0 && transb != 1) return 1;
+  if (lda < (transa == 0 ? m : k)) return 1;
+  if (ldb < (transb == 0 ? k : n)) return 1;
+  if (ldc < m) return 1;
+  /* Column-major storage sizes of op(A), op(B), C. */
+  const std::size_t a_need = (transa == 0)
+      ? static_cast<std::size_t>(k - 1) * lda + m
+      : static_cast<std::size_t>(m - 1) * lda + k;
+  const std::size_t b_need = (transb == 0)
+      ? static_cast<std::size_t>(n - 1) * ldb + k
+      : static_cast<std::size_t>(k - 1) * ldb + n;
+  const std::size_t c_need = static_cast<std::size_t>(n - 1) * ldc + m;
+  Buf* A = resolve(c, Ah, a_need);
+  Buf* B = resolve(c, Bh, b_need);
+  Buf* C = resolve(c, Ch, c_need);
+  if (A == NULL || B == NULL || C == NULL) return 1;
+  const cublasStatus_t st = cublasDgemm(
+      c->handle, op_mode(transa), op_mode(transb), m, n, k, &alpha,
+      A->mem.get(), lda, B->mem.get(), ldb, &beta, C->mem.get(), ldc);
+  return st == CUBLAS_STATUS_SUCCESS ? 0 : 1;
+}
+
+extern "C" int rcupp_d_gesvd(void* h, void* Ah, int m, int n, int lda,
+                             void* Sh, void* Uh, int ldu, void* VTh, int ldvt,
+                             int* info) {
+  if (info == NULL) return 1;
+  *info = -1;
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || !c->cusolver_ok) return 1;
+  /* cuSOLVER legacy gesvd is tall-only; keep one backend-agnostic contract. */
+  if (m < n || n <= 0 || lda < m || ldu < m || ldvt < n) return 1;
+  const int k = n;
+  const std::size_t a_need  = static_cast<std::size_t>(n - 1) * lda + m;
+  const std::size_t u_need  = static_cast<std::size_t>(k - 1) * ldu + m;
+  const std::size_t vt_need = static_cast<std::size_t>(n - 1) * ldvt + k;
+  Buf* A  = resolve(c, Ah, a_need);
+  Buf* S  = resolve(c, Sh, static_cast<std::size_t>(k));
+  Buf* U  = resolve(c, Uh, u_need);
+  Buf* VT = resolve(c, VTh, vt_need);
+  if (A == NULL || S == NULL || U == NULL || VT == NULL) return 1;
+  /* gesvd destroys its input; factor an internal device copy so A is
+   * read-only (contract: A is preserved). */
+  if (!ensure_acopy(c, static_cast<int>(a_need))) return 1;
+  if (cudaMemcpy(c->d_acopy, A->mem.get(), a_need * sizeof(double),
+                 cudaMemcpyDeviceToDevice) != cudaSuccess) return 1;
+  int lwork = 0;
+  if (cusolverDnDgesvd_bufferSize(c->cusolver, m, n, &lwork)
+      != CUSOLVER_STATUS_SUCCESS) return 1;
+  if (!ensure_work(c, lwork)) return 1;
+  if (!ensure_rwork(c, k)) return 1;
+  if (!ensure_info(c)) return 1;
+  const cusolverStatus_t st = cusolverDnDgesvd(
+      c->cusolver, 'S', 'S', m, n, c->d_acopy, lda,
+      S->mem.get(), U->mem.get(), ldu, VT->mem.get(), ldvt,
+      c->d_work, lwork, c->d_rwork, c->d_info);
+  if (st != CUSOLVER_STATUS_SUCCESS) return 1;
+  if (cudaMemcpy(info, c->d_info, sizeof(int), cudaMemcpyDeviceToHost)
+      != cudaSuccess) return 1;
+  return 0;
+}
+
+extern "C" int rcupp_d_cg_solve(void* h, void* X, int n, int p, void* y,
+                                double shift, double tol, int max_iter,
+                                void* x, int* iters, double* residual,
+                                int* converged) {
+  return rcupp_cg_solve_impl(h, X, n, p, y, shift, tol, max_iter, x,
+                             iters, residual, converged);
+}
+
+extern "C" int rcupp_d_prox_grad_step(void* h, void* X, int n, int p, void* y,
+                                      void* z, double step, double threshold,
+                                      double inv_scale, void* out) {
+  return rcupp_prox_grad_step_impl(h, X, n, p, y, z, step, threshold,
+                                   inv_scale, out);
 }
