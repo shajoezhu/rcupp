@@ -25,7 +25,8 @@
  *
  * All buffers belong to a context; rcupp_ctx_destroy() frees every buffer
  * still owned. X is n x p, COLUMN-MAJOR (R order), matching the F0 operators.
- * ABI version 1: rcupp_ctx_abi() returns 1.
+ * ABI version 1: rcupp_ctx_abi() returns 1. The B-stage parts
+ * (gather_rows / syrk / potrf / potrs) are ADDITIVE and do not bump the ABI.
  */
 
 #ifdef __cplusplus
@@ -73,6 +74,19 @@ int   rcupp_d_soft_threshold(void* c, void* u, double t,
  * On invalid args they return 0.0 (no separate error channel). */
 double rcupp_d_dot(void* c, int n, void* a, void* b);
 double rcupp_d_nrm2(void* c, int n, void* x);
+
+/* ---- B-stage additive parts (ABI stays 1) ----
+ * uplo: RCUPP_FILL_LOWER=0 / RCUPP_FILL_UPPER=1 (mirrors cublasFillMode_t).
+ * info: LAPACK-style host int out-arg (0 = ok, >0 = not positive definite).
+ * Returns 0 on success, non-0 on invalid args / shape / backend failure. */
+int   rcupp_d_gather_rows(void* c, void* X, int n, int p,
+                          const int* idx, int m, void* dst);        /* dst[m x p] = X[idx,] */
+int   rcupp_d_syrk(void* c, void* X, int n, int p,
+                   int uplo, double alpha, double beta, void* C);   /* C[p x p] = a X^T X + b C */
+int   rcupp_d_potrf(void* c, int uplo, int n,
+                    void* A, int lda, int* info);                  /* Cholesky factor */
+int   rcupp_d_potrs(void* c, int uplo, int n, int nrhs,
+                    void* A, int lda, void* B, int ldb, int* info);/* solve A X = B */
 
 #ifdef __cplusplus
 }

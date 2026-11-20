@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstddef>
 #include <vector>
+#include <R_ext/Lapack.h>   /* F77_NAME(dsyrk/dpotrf/dpotrs), FCONE; pulls in BLAS.h */
 #include "rcupp_ctx.h"
 
 /*
@@ -263,4 +264,87 @@ extern "C" double rcupp_d_nrm2(void* h, int n, void* xh) {
   double s = 0.0;
   for (int i = 0; i < n; ++i) s += xd[i] * xd[i];
   return std::sqrt(s);
+}
+
+/* ---------------------------------------------------------------------------
+ * B-stage additive parts (ABI stays 1). Host gather loop + R's LAPACK/BLAS.
+ * Semantics mirror the CUDA backend exactly: only the uplo triangle of C is
+ * written by syrk; potrf/potrs report LAPACK info through the int* out-arg.
+ * BLAS_INT / La_INT are both plain int here.
+ * ------------------------------------------------------------------------- */
+
+static char uplo_char(int uplo) { return uplo == 1 ? 'U' : 'L'; }
+
+extern "C" int rcupp_d_gather_rows(void* h, void* Xh, int n, int p,
+                                   const int* idx, int m, void* dsth) {
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || n <= 0 || p <= 0 || m <= 0 || idx == NULL) return 1;
+  for (int k = 0; k < m; ++k) {
+    if (idx[k] < 0 || idx[k] >= n) return 1;
+  }
+  Buf* X = resolve(c, Xh, static_cast<std::size_t>(n) * p);
+  Buf* dst = resolve(c, dsth, static_cast<std::size_t>(m) * p);
+  if (X == NULL || dst == NULL) return 1;
+  const double* xd = X->mem.data();
+  double* dd = dst->mem.data();
+  for (int j = 0; j < p; ++j) {
+    for (int i = 0; i < m; ++i) {
+      dd[i + static_cast<std::size_t>(j) * m] =
+          xd[idx[i] + static_cast<std::size_t>(j) * n];
+    }
+  }
+  return 0;
+}
+
+extern "C" int rcupp_d_syrk(void* h, void* Xh, int n, int p,
+                            int uplo, double alpha, double beta, void* Ch) {
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || n <= 0 || p <= 0) return 1;
+  if (uplo != 0 && uplo != 1) return 1;
+  Buf* X = resolve(c, Xh, static_cast<std::size_t>(n) * p);
+  Buf* C = resolve(c, Ch, static_cast<std::size_t>(p) * p);
+  if (X == NULL || C == NULL) return 1;
+  /* C[p x p] = alpha * X^T X + beta * C. With TRANS='T', BLAS treats A as
+   * k x n = n x p (lda = n) and C as N x N = p x p (ldc = p). */
+  char up = uplo_char(uplo);
+  char tr = 'T';
+  int nn = p, kk = n, lda = n, ldc = p;
+  F77_NAME(dsyrk)(&up, &tr, &nn, &kk, &alpha, X->mem.data(), &lda,
+                  &beta, C->mem.data(), &ldc FCONE FCONE);
+  return 0;
+}
+
+extern "C" int rcupp_d_potrf(void* h, int uplo, int n,
+                             void* Ah, int lda, int* info) {
+  if (info == NULL) return 1;
+  *info = -1;
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || n <= 0 || lda < n) return 1;
+  if (uplo != 0 && uplo != 1) return 1;
+  Buf* A = resolve(c, Ah, static_cast<std::size_t>(n - 1) * lda + n);
+  if (A == NULL) return 1;
+  char up = uplo_char(uplo);
+  int nn = n, ldaa = lda, inf = 0;
+  F77_NAME(dpotrf)(&up, &nn, A->mem.data(), &ldaa, &inf FCONE);
+  *info = inf;
+  return 0;
+}
+
+extern "C" int rcupp_d_potrs(void* h, int uplo, int n, int nrhs,
+                             void* Ah, int lda, void* Bh, int ldb,
+                             int* info) {
+  if (info == NULL) return 1;
+  *info = -1;
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || n <= 0 || nrhs <= 0 || lda < n || ldb < n) return 1;
+  if (uplo != 0 && uplo != 1) return 1;
+  Buf* A = resolve(c, Ah, static_cast<std::size_t>(n - 1) * lda + n);
+  Buf* B = resolve(c, Bh, static_cast<std::size_t>(nrhs - 1) * ldb + n);
+  if (A == NULL || B == NULL) return 1;
+  char up = uplo_char(uplo);
+  int nn = n, nr = nrhs, ldaa = lda, ldbb = ldb, inf = 0;
+  F77_NAME(dpotrs)(&up, &nn, &nr, A->mem.data(), &ldaa,
+                   B->mem.data(), &ldbb, &inf FCONE);
+  *info = inf;
+  return 0;
 }

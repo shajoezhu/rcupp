@@ -161,6 +161,13 @@ typedef void* rcupp_ctx;
 typedef void* rcupp_buf;
 #endif
 
+/* Which triangle a symmetric-rank-k / Cholesky operator reads or writes.
+ * Values match cublasFillMode_t (LOWER=0, UPPER=1) on the CUDA backend. */
+#ifndef RCUPP_FILL_LOWER
+#define RCUPP_FILL_LOWER 0
+#define RCUPP_FILL_UPPER 1
+#endif
+
 /* ---- ABI version ---- */
 static inline int rcupp_ctx_abi(void) {
   typedef int (*fn_t)(void);
@@ -271,6 +278,67 @@ static inline double rcupp_d_nrm2(rcupp_ctx c, int n, rcupp_buf x) {
   typedef double (*fn_t)(rcupp_ctx, int, rcupp_buf);
   static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_nrm2");
   return fun(c, n, x);
+}
+
+/* ---------------------------------------------------------------------------
+ * Phase 0 B-stage: four additional generic parts (ABI stays at 1).
+ *
+ * These are ADDITIVE, algorithm-agnostic building blocks on the SAME resident
+ * buffers: a device-side row gather and a symmetric-rank-k / Cholesky solve
+ * trio. They let a downstream package keep ONE full matrix resident and refit
+ * many row subsets without re-uploading (e.g. reference-panel / CV / rolling
+ * windows). rcupp still knows nothing about ridge, lasso or CV -- it only
+ * supplies parts; the solver loop lives downstream (Rcpp + rcupp).
+ *
+ *   rcupp_d_gather_rows : dst[m x p] = X[idx[0..m), ]  (device-side row index)
+ *   rcupp_d_syrk        : C[p x p] = alpha * X^T X + beta * C  (one triangle)
+ *   rcupp_d_potrf       : Cholesky factor of an SPD A (LAPACK-style info)
+ *   rcupp_d_potrs       : solve A X = B from that factor
+ *
+ * uplo is RCUPP_FILL_LOWER / RCUPP_FILL_UPPER and MUST match across syrk,
+ * potrf and potrs. The int* info out-arg follows LAPACK semantics (0 = ok,
+ * >0 = not positive definite); operator return is 0 on success, non-0 on an
+ * invalid argument / backend failure. ABI version is UNCHANGED (1): existing
+ * downstream code and the rcupp_ctx_abi() guard need no update.
+ * ------------------------------------------------------------------------- */
+
+/* dst[m x p] = X[idx[0..m), ], column-major (X[i + j*n], dst[i + j*m]).
+ * idx is a HOST array of m zero-based row indices; each must be in [0, n). */
+static inline int rcupp_d_gather_rows(rcupp_ctx c, rcupp_buf X, int n, int p,
+                                      const int* idx, int m, rcupp_buf dst) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int,
+                      const int*, int, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_gather_rows");
+  return fun(c, X, n, p, idx, m, dst);
+}
+
+/* C[p x p] = alpha * X^T X + beta * C, X is n x p; only uplo triangle of C is
+ * written. alpha here is the BLAS scalar, NOT the elastic-net mixing alpha. */
+static inline int rcupp_d_syrk(rcupp_ctx c, rcupp_buf X, int n, int p,
+                               int uplo, double alpha, double beta,
+                               rcupp_buf Cbuf) {
+  typedef int (*fn_t)(rcupp_ctx, rcupp_buf, int, int,
+                      int, double, double, rcupp_buf);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_syrk");
+  return fun(c, X, n, p, uplo, alpha, beta, Cbuf);
+}
+
+/* Cholesky: A[n x n] (lda) -> factor in the uplo triangle; *info LAPACK. */
+static inline int rcupp_d_potrf(rcupp_ctx c, int uplo, int n,
+                                rcupp_buf A, int lda, int* info) {
+  typedef int (*fn_t)(rcupp_ctx, int, int, rcupp_buf, int, int*);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_potrf");
+  return fun(c, uplo, n, A, lda, info);
+}
+
+/* Solve A X = B from the potrf factor; A[n x n] (lda), B[n x nrhs] (ldb). */
+static inline int rcupp_d_potrs(rcupp_ctx c, int uplo, int n, int nrhs,
+                                rcupp_buf A, int lda,
+                                rcupp_buf B, int ldb, int* info) {
+  typedef int (*fn_t)(rcupp_ctx, int, int, int,
+                      rcupp_buf, int, rcupp_buf, int, int*);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_d_potrs");
+  return fun(c, uplo, n, nrhs, A, lda, B, ldb, info);
 }
 
 #endif /* RCUPP_H */

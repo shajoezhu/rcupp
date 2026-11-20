@@ -9,6 +9,7 @@ RegisterCCallable
 checkable
 coef
 cuBLAS
+cuSOLVER
 cudaBio
 cudaFin
 cudaGlmnet

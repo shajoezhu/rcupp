@@ -199,4 +199,12 @@ void rcupp_init_ccallables(DllInfo* dll) {
   R_RegisterCCallable("rcupp", "rcupp_d_soft_threshold",   (DL_FUNC) &rcupp_d_soft_threshold);
   R_RegisterCCallable("rcupp", "rcupp_d_dot",              (DL_FUNC) &rcupp_d_dot);
   R_RegisterCCallable("rcupp", "rcupp_d_nrm2",             (DL_FUNC) &rcupp_d_nrm2);
+
+  /* B-stage additive parts (ABI still 1): device-side row gather + syrk +
+   * Cholesky factor/solve. No [[Rcpp::export]]; C++-callable only, resolved
+   * downstream via R_GetCCallable(). */
+  R_RegisterCCallable("rcupp", "rcupp_d_gather_rows",      (DL_FUNC) &rcupp_d_gather_rows);
+  R_RegisterCCallable("rcupp", "rcupp_d_syrk",             (DL_FUNC) &rcupp_d_syrk);
+  R_RegisterCCallable("rcupp", "rcupp_d_potrf",            (DL_FUNC) &rcupp_d_potrf);
+  R_RegisterCCallable("rcupp", "rcupp_d_potrs",            (DL_FUNC) &rcupp_d_potrs);
 }

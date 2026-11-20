@@ -41,10 +41,15 @@ if [ -n "${CUDA_HOME:-}" ]; then
 fi
 
 HAVE_CUDA=0
+# cuSOLVER (header + lib) is required for the B-stage Cholesky parts. If it is
+# missing we fall back to the CPU shim (which implements the same 4 parts via
+# R's LAPACK) rather than producing a GPU build that fails at link time.
 if [ -n "${CUDA_HOME:-}" ] && [ -x "$CUDA_HOME/bin/nvcc" ] \
    && [ -f "$CUDA_HOME/include/cuda_runtime.h" ] \
+   && [ -f "$CUDA_HOME/include/cusolverDn.h" ] \
    && [ -n "$CUDA_LIBDIR" ] \
-   && ls "$CUDA_LIBDIR"/libcudart.so* >/dev/null 2>&1; then
+   && ls "$CUDA_LIBDIR"/libcudart.so* >/dev/null 2>&1 \
+   && ls "$CUDA_LIBDIR"/libcusolver.so* >/dev/null 2>&1; then
   HAVE_CUDA=1
 fi
 
@@ -56,7 +61,7 @@ if [ "$HAVE_CUDA" -eq 1 ]; then
   V_CUDA_HOME="$CUDA_HOME"
   V_NVCC="$CUDA_HOME/bin/nvcc"
   V_CPPFLAGS="-I$CUDA_HOME/include -DHAVE_CUDA"
-  V_LIBS="-L$CUDA_LIBDIR -Wl,-rpath,$CUDA_LIBDIR -lcudart -lcublas"
+  V_LIBS="-L$CUDA_LIBDIR -Wl,-rpath,$CUDA_LIBDIR -lcudart -lcublas -lcusolver"
   V_NVCCFLAGS="-O2 -Xcompiler -fPIC -Xcompiler -std=gnu++17 -gencode arch=compute_$CUDA_ARCH,code=sm_$CUDA_ARCH -I$CUDA_HOME/include -DHAVE_CUDA"
   V_EXTRA="gpu_ops.o lasso_fista_cuda.o rcupp_api_cuda.o rcupp_session_cuda.o rcupp_ctx_cuda.o"
 else

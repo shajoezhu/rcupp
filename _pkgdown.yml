@@ -1,4 +1,4 @@
-destination: ../docs/rcupp
+destination: docs
 
 template:
   bootstrap: 5

@@ -25,7 +25,8 @@ Description: Lightweight, low-level 'Rcpp'/'CUDA' bridge exposing a fixed set of
 License: Apache License 2.0
 Encoding: UTF-8
 Language: en-US
-SystemRequirements: C++17, CUDA toolkit (>= 12.x) [optional]
+SystemRequirements: C++17; optional CUDA toolkit (>= 12.x) with cuBLAS and
+    cuSOLVER, and R's LAPACK/BLAS for the CPU fallback
 NeedsCompilation: yes
 LinkingTo: Rcpp, RcppArmadillo
 Imports: Rcpp

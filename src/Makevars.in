@@ -8,7 +8,11 @@ NVCC = @NVCC@
 NVCCFLAGS = @NVCCFLAGS@
 
 PKG_CPPFLAGS = @CUDA_CPPFLAGS@
-PKG_LIBS = @CUDA_LIBS@
+# LAPACK/BLAS/FLIBS stay LITERAL here (make expands them), NOT inside
+# configure's V_LIBS: a double-quoted sed there would command-substitute $(...).
+# The CPU fallback calls R's LAPACK (dsyrk/dpotrf/dpotrs); the CUDA build needs
+# them too for a uniform link line. Makevars.win/ucrt already have this line.
+PKG_LIBS = @CUDA_LIBS@ $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
 # Column 0 on purpose: R's tools:::.shlib_internal only defers to this object
 # list when Makevars contains a line matching ^OBJECTS *= (no leading space).
