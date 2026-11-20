@@ -1,3 +1,7 @@
+# rcupp 0.1.2
+
+* Development version bumped from 0.1.1.
+
 # rcupp 0.1.1
 
 * Development version bumped from 0.1.0.
