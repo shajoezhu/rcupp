@@ -1,5 +1,18 @@
 # rcupp 0.1.3
 
+* Make `rcupp_d_prox_grad_step` genuinely fused on CUDA: it now launches ONE
+  `ctx_prox_grad_fused_kernel` per call (single block, shared-memory scratch,
+  two `__syncthreads()`), folding `X·z`, residual scaling, `Xᵀ·r` and the prox
+  into a single kernel instead of composing nine level-1 operators with four
+  `cudaMalloc`/`cudaFree` pairs per call. The CPU fallback still uses the
+  shared `rcupp_parts_impl.h` composition, bit-identical; `z` and `out` may
+  alias. The public signature, registrations, `configure` and `rcupp_ctx_abi()`
+  (still 1) are unchanged, and `rcupp` stays algorithm-agnostic (no lasso /
+  ridge / λ logic). This delivers on the documented "one launch per step"
+  contract and
+  lets downstream hot loops such as `cudaFin::rolling_resident()` collapse an
+  ISTA iteration to one launch (demo 3 FIN `3/6` -> `6/6`).
+
 * Add a dependency-free diagnostics and profiling API covering GPU device
   memory, method/function timing, a device-versus-wall time split, and R heap
   memory. Six new R functions (`rcupp_device_memory()`, `rcupp_tic()`,

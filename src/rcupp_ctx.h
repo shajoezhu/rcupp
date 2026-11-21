@@ -113,8 +113,10 @@ int   rcupp_d_potrs(void* c, int uplo, int n, int nrhs,
  * prox_grad_step: ONE proximal-gradient step on resident buffers:
  *         out = prox(z + step * X^T (y - X z)), where prox(u) is
  *         soft_threshold(u, threshold) scaled by inv_scale. X n x p, y n,
- *         z p (current iterate), out p (next iterate). A level-2 part; the
- *         lambda path / momentum / convergence stay DOWNSTREAM.
+ *         z p (current iterate), out p (next iterate). A level-2 part: CUDA
+ *         fuses the whole step into ONE kernel launch (CPU fallback composes
+ *         level-1 ops); z/out may alias. The lambda path / momentum /
+ *         convergence stay DOWNSTREAM.
  * Returns 0 on success, non-0 on invalid args / shape / backend failure. */
 int   rcupp_d_gemm(void* c, int transa, int transb, int m, int n, int k,
                    double alpha, void* A, int lda, void* B, int ldb,

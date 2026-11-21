@@ -3,6 +3,9 @@ CUDA
 FISTA
 GEMM
 GetCCallable
+ISTA
+prox
+λ
 JIT
 LinkingTo
 Lipschitz

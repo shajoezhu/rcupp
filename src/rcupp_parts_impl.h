@@ -13,9 +13,13 @@
  *
  * Each backend TU includes this header and exposes thin extern "C" entry
  * points that call these helpers. Scratch buffers are ctx-owned and obtained
- * via rcupp_buf_alloc()/rcupp_buf_free(), so the public signatures stay small;
- * a downstream hot loop that already holds workspaces should keep composing
- * the level-1 operators directly (as cudaGlmnet/src/enet_path.cpp does).
+ * via rcupp_buf_alloc()/rcupp_buf_free(), so the public signatures stay small.
+ * NOTE: the CUDA backend overrides rcupp_d_prox_grad_step with a SINGLE fused
+ * kernel (ctx_prox_grad_fused_kernel in rcupp_ctx_cuda.cu) that folds a whole
+ * iteration into one launch; the implementation below remains the CPU fallback
+ * and the arithmetic reference. Other hot loops that need momentum / custom
+ * schedules still compose level-1 ops directly (cudaGlmnet/src/enet_path.cpp,
+ * and cudaFin P3-fin whose inner step now calls the fused part).
  *
  * This is CUDA-free, Rcpp-free, STL-light plain C++: safe for nvcc AND g++.
  */
@@ -102,11 +106,14 @@ static inline int rcupp_cg_solve_impl(void* c, void* X, int n, int p,
   return 0;
 }
 
-/* ONE proximal-gradient (ISTA) step:
+/* ONE proximal-gradient (ISTA) step (CPU fallback + arithmetic reference):
  *   out = soft_threshold( z + step * X^T (y - X z), threshold ) * inv_scale
  * This reproduces exactly the inner step of cudaGlmnet/src/enet_path.cpp
  * (lines 113-122) but folds it into a single C-ABI call, with device-resident
- * scratch. The lambda path, FISTA momentum and convergence stay DOWNSTREAM. */
+ * scratch. On CUDA, rcupp_ctx_cuda.cu overrides this with a single fused
+ * kernel (same arithmetic, one launch, no per-call scratch alloc); the CPU
+ * backend still runs this level-1 composition, bit-identical. The lambda path,
+ * FISTA momentum and convergence stay DOWNSTREAM. z/out aliasing is safe. */
 static inline int rcupp_prox_grad_step_impl(void* c, void* X, int n, int p,
                                             void* y, void* z, double step,
                                             double threshold,

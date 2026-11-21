@@ -2,6 +2,7 @@
 #include <cublas_v2.h>
 #include <cusolverDn.h>
 #include <cstddef>
+#include <cmath>
 #include <vector>
 #include "gpu_ops.cuh"
 #include "rcupp_ctx.h"
@@ -19,11 +20,17 @@
  * Exactly one of rcupp_ctx_cuda.o / rcupp_ctx_cpu.o is linked (configure).
  *
  * Device code: the __global__ kernels here (ctx_fill_kernel,
- * ctx_gather_rows_kernel) are DEFINED and LAUNCHED in this translation unit,
- * so no device symbol crosses .cu files and nvcc needs neither -rdc=true nor
- * a device-link step -- the same rule gpu_ops.cu documents. All other
- * operators call the existing op_* host launchers in gpu_ops.cu, cuBLAS
- * (syrk) or cuSOLVER (potrf/potrs) directly.
+ * ctx_gather_rows_kernel, ctx_prox_grad_fused_kernel) are DEFINED and LAUNCHED
+ * in this translation unit, so no device symbol crosses .cu files and nvcc
+ * needs neither -rdc=true nor a device-link step -- the same rule gpu_ops.cu
+ * documents. All other operators call the existing op_* host launchers in
+ * gpu_ops.cu, cuBLAS (syrk) or cuSOLVER (potrf/potrs) directly.
+ *
+ * rcupp_d_prox_grad_step is the ONE exception to the "compose level-1 ops"
+ * rule: on CUDA it launches a single fused kernel that folds a whole ISTA
+ * iteration (X z, residual scaling, X^T r, prox) into one launch, removing the
+ * per-iteration launch overhead. The CPU backend still uses the shared
+ * level-1 composition in rcupp_parts_impl.h (identical numerics).
  *
  * Lifetime: contexts/buffers are created and destroyed explicitly by the
  * downstream C++ caller (RAII). Nothing is held in a process-global static
@@ -50,6 +57,60 @@ __global__ void ctx_gather_rows_kernel(const double* X, int n, int p,
   const int j = tid / m;
   dst[i + static_cast<std::size_t>(j) * m] =
       X[idx[i] + static_cast<std::size_t>(j) * n];
+}
+
+/* ONE fused proximal-gradient (ISTA) step in a SINGLE kernel launch:
+ *   out = soft_threshold( z + step * X^T (y - X z), threshold ) * inv_scale
+ * X is n x p, column-major (X[i + j*n]); y/r are n, z/g/out are p.
+ *
+ * This is the CUDA realisation of rcupp_parts_impl.h:rcupp_prox_grad_step_impl,
+ * but instead of 9 level-1 ops + 4 scratch cudaMalloc/Free per call it uses ONE
+ * block, two __syncthreads() phases and shared-memory scratch:
+ *   phase 1 (all threads): r[i] = (y[i] - sum_k X[i+k*n]*z[k]) * step
+ *   phase 2 (j = tid)    : g[j] = sum_i X[i+j*n]*r[i]   (in-order, deterministic)
+ *   phase 3 (j = tid)    : out[j] = prox(z[j]+g[j], threshold) * inv_scale
+ * No atomics, no cooperative launch, no grid sync, no per-call device scratch.
+ * The lambda path, FISTA momentum and convergence STAY DOWNSTREAM.
+ *
+ * z == out aliasing is safe: phase 1 reads z[k] entirely BEFORE the phase-3
+ * write (separated by a syncthreads), and each phase-3 thread reads z[j] into
+ * a register before writing its own out[j]. */
+__global__ void ctx_prox_grad_fused_kernel(const double* X, int n, int p,
+                                           const double* y, const double* z,
+                                           double step, double threshold,
+                                           double inv_scale, double* out) {
+  extern __shared__ double sm[];
+  double* r = sm;        /* n doubles */
+  double* g = sm + n;    /* p doubles */
+  const int tid = threadIdx.x;
+  const int nt = blockDim.x;
+
+  /* Phase 1: scaled residual r = step * (y - X z). */
+  for (int i = tid; i < n; i += nt) {
+    double s = 0.0;
+    const std::size_t base = static_cast<std::size_t>(i);
+    for (int k = 0; k < p; ++k) {
+      s += X[base + static_cast<std::size_t>(k) * n] * z[k];
+    }
+    r[i] = (y[i] - s) * step;
+  }
+  __syncthreads();
+
+  /* Phase 2: gradient g = X^T r (column-major: contiguous in i). */
+  for (int j = tid; j < p; j += nt) {
+    double s = 0.0;
+    const std::size_t base = static_cast<std::size_t>(j) * n;
+    for (int i = 0; i < n; ++i) s += X[base + i] * r[i];
+    g[j] = s;
+  }
+  __syncthreads();
+
+  /* Phase 3: proximal update (matches op_soft_threshold exactly). */
+  for (int j = tid; j < p; j += nt) {
+    const double u = z[j] + g[j];
+    const double a = fabs(u) - threshold;
+    out[j] = (a > 0.0 ? copysign(a, u) : 0.0) * inv_scale;
+  }
 }
 
 struct Buf {
@@ -522,9 +583,38 @@ extern "C" int rcupp_d_cg_solve(void* h, void* X, int n, int p, void* y,
                              iters, residual, converged);
 }
 
+/* Host launcher for the fused ISTA step. ONE block keeps the two reductions
+ * deterministic; shared scratch is (n+p) doubles, sized per call. For n large
+ * enough to exceed the 48KB default dynamic shared-memory limit, fall back to
+ * the shared level-1 composition so the part stays correct for every size. */
+static int rcupp_prox_grad_step_fused_cuda(void* h, void* Xh, int n, int p,
+                                           void* yh, void* zh, double step,
+                                           double threshold, double inv_scale,
+                                           void* outh) {
+  Ctx* c = static_cast<Ctx*>(h);
+  if (!ctx_ok(c) || n <= 0 || p <= 0) return 1;
+  const std::size_t smem =
+      (static_cast<std::size_t>(n) + static_cast<std::size_t>(p)) *
+      sizeof(double);
+  if (smem > 48u * 1024u) {
+    return rcupp_prox_grad_step_impl(h, Xh, n, p, yh, zh, step, threshold,
+                                     inv_scale, outh);
+  }
+  Buf* X = resolve(c, Xh, static_cast<std::size_t>(n) * p);
+  Buf* y = resolve(c, yh, n);
+  Buf* z = resolve(c, zh, p);
+  Buf* out = resolve(c, outh, p);
+  if (X == NULL || y == NULL || z == NULL || out == NULL) return 1;
+  const int block = 256;
+  ctx_prox_grad_fused_kernel<<<1, block, smem>>>(
+      X->mem.get(), n, p, y->mem.get(), z->mem.get(),
+      step, threshold, inv_scale, out->mem.get());
+  return 0;
+}
+
 extern "C" int rcupp_d_prox_grad_step(void* h, void* X, int n, int p, void* y,
                                       void* z, double step, double threshold,
                                       double inv_scale, void* out) {
-  return rcupp_prox_grad_step_impl(h, X, n, p, y, z, step, threshold,
-                                   inv_scale, out);
+  return rcupp_prox_grad_step_fused_cuda(h, X, n, p, y, z, step, threshold,
+                                         inv_scale, out);
 }

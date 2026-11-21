@@ -457,10 +457,13 @@ static inline int rcupp_d_cg_solve(rcupp_ctx c, rcupp_buf X, int n, int p,
  * where prox(u) = soft_threshold(u, threshold) * inv_scale.
  * X is n x p, y is n, z is p (current iterate), out is p (next iterate).
  * A generic level-2 part that folds one whole iteration into a single C-ABI
- * call (the matvecs remain cuBLAS/gemv internal launches, but there are no
- * host<->device round trips and no per-operator boundary crossings). The
- * lambda path, FISTA momentum and convergence test STAY DOWNSTREAM. Returns
- * 0 on success, non-0 on invalid args. */
+ * call. On the CUDA backend it is ONE fused kernel launch (both matvecs, the
+ * residual scaling and the prox run in one block with shared scratch); the
+ * CPU fallback composes the same level-1 operators with identical numerics.
+ * There are no host<->device round trips and no per-operator boundary
+ * crossings. z and out may alias. The lambda path, FISTA momentum and
+ * convergence test STAY DOWNSTREAM. Returns 0 on success, non-0 on invalid
+ * args. */
 static inline int rcupp_d_prox_grad_step(rcupp_ctx c, rcupp_buf X, int n, int p,
                                          rcupp_buf y, rcupp_buf z, double step,
                                          double threshold, double inv_scale,
