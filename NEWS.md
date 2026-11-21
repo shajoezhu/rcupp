@@ -1,3 +1,7 @@
+# rcupp 0.1.4
+
+* Development version bumped from 0.1.3.
+
 # rcupp 0.1.3
 
 * Make `rcupp_d_prox_grad_step` genuinely fused on CUDA: it now launches ONE
