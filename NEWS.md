@@ -1,3 +1,7 @@
+# rcupp 0.1.4
+
+* Development version bumped from 0.1.3.
+
 # rcupp 0.1.3
 
 * Add a dependency-free diagnostics and profiling API covering GPU device
