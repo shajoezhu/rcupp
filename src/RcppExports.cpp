@@ -37,6 +37,36 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// device_mem_info_cpp
+Rcpp::List device_mem_info_cpp();
+RcppExport SEXP _rcupp_device_mem_info_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(device_mem_info_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// device_tic_cpp
+int device_tic_cpp();
+RcppExport SEXP _rcupp_device_tic_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(device_tic_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
+// device_toc_cpp
+double device_toc_cpp();
+RcppExport SEXP _rcupp_device_toc_cpp() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(device_toc_cpp());
+    return rcpp_result_gen;
+END_RCPP
+}
 // session_create_cpp
 SEXP session_create_cpp();
 RcppExport SEXP _rcupp_session_create_cpp() {
@@ -97,6 +127,9 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_rcupp_lasso_fista_cpp", (DL_FUNC) &_rcupp_lasso_fista_cpp, 5},
     {"_rcupp_cuda_available_cpp", (DL_FUNC) &_rcupp_cuda_available_cpp, 0},
+    {"_rcupp_device_mem_info_cpp", (DL_FUNC) &_rcupp_device_mem_info_cpp, 0},
+    {"_rcupp_device_tic_cpp", (DL_FUNC) &_rcupp_device_tic_cpp, 0},
+    {"_rcupp_device_toc_cpp", (DL_FUNC) &_rcupp_device_toc_cpp, 0},
     {"_rcupp_session_create_cpp", (DL_FUNC) &_rcupp_session_create_cpp, 0},
     {"_rcupp_session_set_data_cpp", (DL_FUNC) &_rcupp_session_set_data_cpp, 3},
     {"_rcupp_session_fit_cpp", (DL_FUNC) &_rcupp_session_fit_cpp, 5},

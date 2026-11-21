@@ -1,0 +1,140 @@
+---
+title: "Profiling rcupp: memory and method diagnostics"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Profiling rcupp: memory and method diagnostics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(rcupp)
+```
+
+`rcupp` ships a small, dependency-free set of diagnostic functions for
+profiling memory use and method run time. They are built for **diagnosis**,
+not for benchmark headlines: the numbers describe what happened in one run on
+your machine, with all of its overhead and noise. This vignette explains the
+four things they measure, how to read them, and where the honest limits are.
+No GPU is required to run it; on the CPU fallback the device fields are `NA`.
+
+## Which backend is linked
+
+Every diagnostic reports the linked backend. When `rcupp` is built without the
+CUDA toolkit there is no device to measure, so the device-derived fields are
+`NA_real_`; the timing and R-heap fields still work and no call errors.
+
+```{r backend}
+cuda_available()
+```
+
+## GPU device memory
+
+`rcupp_device_memory()` takes a whole-device snapshot through
+`cudaMemGetInfo()`. It reports free, total, and used memory in bytes and MiB,
+plus `available`, `cuda`, and `backend` flags.
+
+```{r device-memory}
+mem <- rcupp_device_memory()
+mem$backend
+mem$available
+mem$free_mb
+```
+
+`used` is `total - free` for the **whole device**, not a byte count of any
+single object: other processes and rcupp's own caching allocator also move it.
+On the CPU fallback `available` is `FALSE` and the numeric fields are
+`NA_real_`. A before/after difference is available inside `rcupp_profile()`.
+
+## Method timing
+
+`rcupp_bench()` evaluates an expression several times and reports the spread
+of wall-clock and device time. Prefer it over a single reading: on WSL and
+under host load, cold GPU calls and clock ramp make one number unreliable.
+
+```{r bench}
+b <- rcupp_bench(1 + 1, reps = 5)
+b$wall_ms_median
+b$wall_ms_min
+b$wall_ms_max
+```
+
+There is no absolute threshold implied by these numbers. Use the distribution
+to see how noisy a given workload is, not to claim a speedup.
+
+## Device time versus host overhead
+
+`rcupp_tic()` and `rcupp_toc()` bracket a region with a pair of CUDA events on
+the default stream, the stream every rcupp operator uses. `rcupp_toc()`
+returns device-side elapsed milliseconds, or `NA_real_` when CUDA is absent.
+
+We use a small data set so the example stays cheap on every backend.
+
+```{r data}
+set.seed(1)
+X <- matrix(rnorm(60 * 5), 60, 5)
+y <- rnorm(60)
+```
+
+```{r tic-toc}
+rcupp_tic()
+invisible(lasso_fista(X, y, 0.1))
+rcupp_toc()
+```
+
+`rcupp_profile()` combines that device timer with a host wall clock
+(`proc.time()`), R heap accounting (`gc()`), and a before/after device-memory
+delta in one call. The expression is evaluated in the calling frame and its
+value is kept in `$result`, so the work is not wasted.
+
+```{r profile}
+p <- rcupp_profile(lasso_fista(X, y, 0.1))
+p$wall_ms
+p$device_ms
+p$host_overhead_ms
+```
+
+`device_ms` is elapsed time on the default stream: kernels plus synchronous
+host-device transfers. `host_overhead_ms` is the remainder of wall time (R
+overhead, handle and `cudaMalloc` setup, just-in-time compilation, and clock
+ramp). This is a **device-versus-wall split, not per-kernel attribution**.
+Telling which individual kernel cost what needs external tooling such as
+Nsight Systems or NVTX markers; rcupp does not instrument the operator hot
+path.
+
+On WSL/CUDA each tiny operator call carries a few milliseconds of fixed
+overhead and GPU clocks ramp lazily, so a single `device_ms` is dominated by
+that overhead. Read it as a diagnostic hint, and use `rcupp_bench()` to see the
+distribution.
+
+## R heap memory
+
+`rcupp_memory_report()` is a standalone snapshot of R's heap via `gc()`, with
+a device snapshot for context. `r_cells_used` and `r_cells_max_used` are
+retained heap cells.
+
+```{r memory-report}
+r <- rcupp_memory_report()
+r$r_cells_used
+r$r_cells_max_used
+```
+
+Inside `rcupp_profile()`, `r_cells_net_delta` is the net change in retained
+heap cells and `r_cells_peak` is the peak after `gc(reset = TRUE)`. Both are
+**retained-heap figures, not cumulative bytes allocated**; use `Rprofmem()` for
+a full allocation trace. The `device_*_delta_bytes` fields are whole-device
+`cudaMemGetInfo()` differences and are approximate, because transient buffers
+are freed before a call returns.
+
+## Reading the numbers honestly
+
+* These are **diagnostic snapshots**, not benchmarks. They do not isolate GPU
+  acceleration from compilation, host-device transfers, or R-to-C++ boundary
+  cost.
+* On the CPU fallback every device-derived field is `NA_real_`, by design.
+* A single measurement is noisy. Use `rcupp_bench()` and report the spread.
+* `device_ms` is a default-stream total, not a per-kernel breakdown.
+
+For real per-kernel attribution, reach for external profilers; for honest
+whole-method comparisons, keep the baseline and conditions explicit.

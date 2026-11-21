@@ -9,6 +9,18 @@ cuda_available_cpp <- function() {
     .Call(`_rcupp_cuda_available_cpp`)
 }
 
+device_mem_info_cpp <- function() {
+    .Call(`_rcupp_device_mem_info_cpp`)
+}
+
+device_tic_cpp <- function() {
+    .Call(`_rcupp_device_tic_cpp`)
+}
+
+device_toc_cpp <- function() {
+    .Call(`_rcupp_device_toc_cpp`)
+}
+
 session_create_cpp <- function() {
     .Call(`_rcupp_session_create_cpp`)
 }

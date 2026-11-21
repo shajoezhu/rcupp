@@ -36,6 +36,25 @@ double rcupp_dot(int n, const double* a, const double* b);
 double rcupp_nrm2(int n, const double* x);
 void   rcupp_soft_threshold(const double* u, double t, double* out, int n);
 
+/* ---- Diagnostic / profiling primitives (ABI stays 1) ---------------------
+ * Backend-agnostic, non-invasive: they never touch the operator hot path.
+ * All byte/ms values cross the boundary as double (exact to 2^53).
+ *   rcupp_device_mem_info: free and total device bytes; 0 on success, 1 when
+ *     CUDA is unavailable/failed (both outputs set to -1.0).
+ *   rcupp_device_tic:      arm a default-stream CUDA event; 0 on success, 1
+ *     when CUDA is unavailable/failed.
+ *   rcupp_device_toc:      device-side elapsed ms since tic (>= 0), or -1.0
+ *     sentinel when CUDA is unavailable / no armed tic / error.
+ *   rcupp_diag_shutdown:   release the process-global event pair; idempotent,
+ *     internal lifecycle helper (deliberately NOT registered for downstream).
+ * The CPU fallback implements all four with well-defined sentinels / no-ops so
+ * downstream C++ callers and R behave identically on either backend.
+ * ------------------------------------------------------------------------- */
+int    rcupp_device_mem_info(double* free_bytes, double* total_bytes);
+int    rcupp_device_tic(void);
+double rcupp_device_toc(void);
+void   rcupp_diag_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

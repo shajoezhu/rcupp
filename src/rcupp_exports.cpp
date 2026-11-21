@@ -47,6 +47,33 @@ bool cuda_available_cpp() {
   return (bool)rcupp_cuda_available();
 }
 
+/* ---- Diagnostic / profiling R wrappers (backend-agnostic) ----------------
+ * Thin .Call wrappers over the plain-C ABI, exactly like cuda_available_cpp().
+ * The CUDA build returns real values; the CPU shim returns the documented
+ * sentinels (-1.0 / status 1). The R layer (R/diagnostics.R) converts those
+ * to NA/FALSE. This file stays CUDA-free and is compiled by g++ in both builds.
+ * ------------------------------------------------------------------------- */
+
+// [[Rcpp::export]]
+Rcpp::List device_mem_info_cpp() {
+  double free_bytes = -1.0, total_bytes = -1.0;
+  const int status = rcupp_device_mem_info(&free_bytes, &total_bytes);
+  return Rcpp::List::create(
+      Rcpp::Named("status")      = status,
+      Rcpp::Named("free_bytes")  = free_bytes,
+      Rcpp::Named("total_bytes") = total_bytes);
+}
+
+// [[Rcpp::export]]
+int device_tic_cpp() {
+  return rcupp_device_tic();
+}
+
+// [[Rcpp::export]]
+double device_toc_cpp() {
+  return rcupp_device_toc();
+}
+
 /* ---------------------------------------------------------------------------
  * P1 session API: an opaque void* handle (from rcupp_session_create) is stored
  * in a raw EXTPTRSXP with a C finalizer that calls rcupp_session_destroy at GC.
@@ -134,9 +161,13 @@ void session_destroy_cpp(SEXP s) {
   }
 }
 
-/* Release the process-global one-shot pool at unload (see .onUnload in zzz.R). */
+/* Release the process-global one-shot pool AND the diagnostic event pair at
+ * unload (see .onUnload in zzz.R). Both are idempotent / no-ops on the CPU
+ * shim. Order matters only in that both must run before the CUDA context and
+ * DLL go away. */
 // [[Rcpp::export]]
 void pool_shutdown_cpp() {
+  rcupp_diag_shutdown();
   rcupp_pool_shutdown();
 }
 
@@ -169,6 +200,17 @@ void rcupp_init_ccallables(DllInfo* dll) {
                       (DL_FUNC) &rcupp_nrm2);
   R_RegisterCCallable("rcupp", "rcupp_soft_threshold",
                       (DL_FUNC) &rcupp_soft_threshold);
+
+  /* Diagnostic / profiling primitives (ABI stays 1; additive). Published so
+   * LinkingTo: rcupp packages can profile their own C++ solver loops too. The
+   * lifecycle helper rcupp_diag_shutdown is deliberately NOT registered. */
+  R_RegisterCCallable("rcupp", "rcupp_device_mem_info",
+                      (DL_FUNC) &rcupp_device_mem_info);
+  R_RegisterCCallable("rcupp", "rcupp_device_tic",
+                      (DL_FUNC) &rcupp_device_tic);
+  R_RegisterCCallable("rcupp", "rcupp_device_toc",
+                      (DL_FUNC) &rcupp_device_toc);
+
   R_RegisterCCallable("rcupp", "rcupp_session_create",
                       (DL_FUNC) &rcupp_session_create);
   R_RegisterCCallable("rcupp", "rcupp_session_set_data",

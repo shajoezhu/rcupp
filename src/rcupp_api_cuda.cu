@@ -41,6 +41,33 @@ class ScopedHandle {
   bool ok_;
 };
 
+/*
+ * Diagnostic event pair for the default-stream device timer. Held through a
+ * deliberately LEAKED naked pointer (same rationale as OneShotPool in
+ * lasso_fista_cuda.cu: a static destructor calling cudaEventDestroy could run
+ * after the CUDA context is gone and crash). Created lazily on the first
+ * rcupp_device_tic(); released only by rcupp_diag_shutdown() at unload. If that
+ * is never called the pointer simply leaks at exit -- harmless, no CUDA calls
+ * in any destructor. There is ONE process-global pair, so the timer is NOT
+ * reentrant/nestable (R is single-threaded; only call-stack nesting matters).
+ */
+struct DiagState {
+  cudaEvent_t start;
+  cudaEvent_t stop;
+  bool created;
+  bool armed;
+
+  DiagState() : start(NULL), stop(NULL), created(false), armed(false) {}
+};
+
+/* Deliberately leaked; freed only by rcupp_diag_shutdown() at unload. */
+DiagState* g_diag = NULL;
+
+DiagState& diag() {
+  if (!g_diag) g_diag = new DiagState();
+  return *g_diag;
+}
+
 }  // namespace
 
 extern "C" void rcupp_gemv(const double* X, int n, int p,
@@ -123,4 +150,60 @@ extern "C" void rcupp_soft_threshold(const double* u, double t,
   cudaMemcpy(d_u.get(), u, sizeof(double) * n, cudaMemcpyHostToDevice);
   op_soft_threshold(d_u.get(), t, d_out.get(), n);
   cudaMemcpy(out, d_out.get(), sizeof(double) * n, cudaMemcpyDeviceToHost);
+}
+
+/* ---- Diagnostic / profiling primitives --------------------------------- */
+
+extern "C" int rcupp_device_mem_info(double* free_bytes, double* total_bytes) {
+  if (free_bytes) *free_bytes = -1.0;
+  if (total_bytes) *total_bytes = -1.0;
+  if (rcupp_cuda_available() != 1) return 1;
+  std::size_t f = 0, t = 0;
+  if (cudaMemGetInfo(&f, &t) != cudaSuccess) return 1;
+  if (free_bytes) *free_bytes = static_cast<double>(f);
+  if (total_bytes) *total_bytes = static_cast<double>(t);
+  return 0;
+}
+
+extern "C" int rcupp_device_tic(void) {
+  if (rcupp_cuda_available() != 1) return 1;
+  DiagState& d = diag();
+  if (!d.created) {
+    if (cudaEventCreate(&d.start) != cudaSuccess) return 1;
+    if (cudaEventCreate(&d.stop) != cudaSuccess) {
+      cudaEventDestroy(d.start);
+      d.start = NULL;
+      return 1;
+    }
+    d.created = true;
+  }
+  /* Record on the legacy default stream (0); all rcupp operators use it. */
+  if (cudaEventRecord(d.start, 0) != cudaSuccess) {
+    d.armed = false;
+    return 1;
+  }
+  d.armed = true;
+  return 0;
+}
+
+extern "C" double rcupp_device_toc(void) {
+  DiagState* d = g_diag;  /* may be NULL if tic was never armed */
+  if (d == NULL || !d->created || !d->armed) return -1.0;
+  d->armed = false;
+  if (cudaEventRecord(d->stop, 0) != cudaSuccess) return -1.0;
+  if (cudaEventSynchronize(d->stop) != cudaSuccess) return -1.0;
+  float ms = 0.0f;
+  if (cudaEventElapsedTime(&ms, d->start, d->stop) != cudaSuccess) return -1.0;
+  return static_cast<double>(ms);
+}
+
+extern "C" void rcupp_diag_shutdown(void) {
+  if (g_diag) {
+    if (g_diag->created) {
+      cudaEventDestroy(g_diag->start);
+      cudaEventDestroy(g_diag->stop);
+    }
+    delete g_diag;
+    g_diag = NULL;
+  }
 }

@@ -59,3 +59,27 @@ extern "C" void rcupp_soft_threshold(const double* u, double t,
     out[i] = a > 0.0 ? std::copysign(a, u[i]) : 0.0;
   }
 }
+
+/* ---- Diagnostic / profiling primitives (CPU fallback) --------------------
+ * Identical signatures to rcupp_api_cuda.cu. There is no device here, so every
+ * query returns the documented "CUDA unavailable" sentinel: -1.0 for byte/ms
+ * values and 1 for the int status. This keeps downstream C++ callers and the
+ * R layer backend-agnostic -- they convert the sentinels to NA/FALSE, never
+ * crash. rcupp_diag_shutdown() is a no-op (no CUDA resources to release).
+ * ------------------------------------------------------------------------- */
+extern "C" int rcupp_device_mem_info(double* free_bytes, double* total_bytes) {
+  if (free_bytes) *free_bytes = -1.0;
+  if (total_bytes) *total_bytes = -1.0;
+  return 1;
+}
+
+extern "C" int rcupp_device_tic(void) {
+  return 1;
+}
+
+extern "C" double rcupp_device_toc(void) {
+  return -1.0;
+}
+
+extern "C" void rcupp_diag_shutdown(void) {
+}

@@ -91,6 +91,44 @@ static inline void rcupp_soft_threshold(const double* u, double t,
 }
 
 /* ---------------------------------------------------------------------------
+ * Diagnostic / profiling primitives (ABI stays 1; additive, backend-agnostic).
+ *
+ * These are NON-INVASIVE observability helpers: they never touch the operator
+ * hot path. On a CUDA build they return real device numbers; on the CPU
+ * fallback they return well-defined sentinels so downstream C++ code behaves
+ * identically on either backend (no device, no crash):
+ *   rcupp_device_mem_info : free and total device bytes; 0 on success, 1 when
+ *     CUDA is unavailable (both outputs set to -1.0).
+ *   rcupp_device_tic     : arm a default-stream CUDA event; 0 / 1 as above.
+ *   rcupp_device_toc     : device-side elapsed ms since tic (>= 0), or -1.0
+ *     sentinel when CUDA is unavailable / no armed tic / error.
+ *
+ * rcupp_device_toc measures DEVICE-SIDE elapsed on the legacy default stream
+ * (kernels + synchronous H<->D transfers). Comparing it against a host wall
+ * clock splits GPU time from host/launch overhead -- it is NOT per-kernel
+ * attribution (that needs external Nsight Systems / NVTX). There is ONE
+ * process-global event pair, so the timer is NOT reentrant / nestable.
+ * ------------------------------------------------------------------------- */
+static inline int rcupp_device_mem_info(double* free_bytes,
+                                         double* total_bytes) {
+  typedef int (*fn_t)(double*, double*);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_device_mem_info");
+  return fun(free_bytes, total_bytes);
+}
+
+static inline int rcupp_device_tic(void) {
+  typedef int (*fn_t)(void);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_device_tic");
+  return fun();
+}
+
+static inline double rcupp_device_toc(void) {
+  typedef double (*fn_t)(void);
+  static fn_t fun = (fn_t) R_GetCCallable("rcupp", "rcupp_device_toc");
+  return fun();
+}
+
+/* ---------------------------------------------------------------------------
  * P1 SESSION C ABI: persistent device-X / cuBLAS-handle reuse across fits.
  *
  *   void* h = rcupp_session_create();

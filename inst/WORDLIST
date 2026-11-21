@@ -3,10 +3,16 @@ CUDA
 FISTA
 GEMM
 GetCCallable
+JIT
 LinkingTo
 Lipschitz
+MiB
+NVTX
+Nsight
 Rcpp
 RegisterCCallable
+WSL
+allocator
 checkable
 coef
 cuBLAS
@@ -18,5 +24,10 @@ finalizer
 github
 glmnet
 installable
+nestable
+profilers
+rcupp's
+reentrant
 runnable
+sys
 walkthrough

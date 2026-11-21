@@ -1,5 +1,18 @@
 # rcupp 0.1.3
 
+* Add a dependency-free diagnostics and profiling API covering GPU device
+  memory, method/function timing, a device-versus-wall time split, and R heap
+  memory. Six new R functions (`rcupp_device_memory()`, `rcupp_tic()`,
+  `rcupp_toc()`, `rcupp_profile()`, `rcupp_bench()`, `rcupp_memory_report()`)
+  expose a global `cudaMemGetInfo()` snapshot, a default-stream CUDA-event
+  timer, and combined per-expression diagnostic snapshots. The underlying
+  primitives are also published through the public C ABI
+  (`inst/include/rcupp.h`) so `LinkingTo: rcupp` packages can profile their own
+  C++ solver loops; ABI stays 1. Implemented by both the CUDA backend and the
+  CPU fallback, which returns `NA` / sentinel values without error. A new
+  `profiling` vignette documents the four metrics and their limits. No new R
+  dependencies; solver behavior and the operator hot path are unchanged.
+
 * Development version bumped from 0.1.2.
 
 # rcupp 0.1.2

@@ -13,8 +13,16 @@ reference:
 - title: Backend
   contents:
   - cuda_available
+- title: Diagnostics and profiling
+  contents:
+  - rcupp_device_memory
+  - rcupp_device_timer
+  - rcupp_profile
+  - rcupp_bench
+  - rcupp_memory_report
 
 articles:
 - title: Get started
   contents:
   - getting-started
+  - profiling
